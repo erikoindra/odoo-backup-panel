@@ -1,0 +1,54 @@
+# odoo-backup-panel: web + worker (+ an optional socket proxy for a local Docker).
+#
+#   cp .env.example .env        # fill it in
+#   docker compose up -d
+#   docker compose exec web python manage.py createsuperuser
+#
+# Add `--profile proxy` when the panel should manage the Docker on this same host (DOCKER_ENDPOINTS).
+# With Portainer (PORTAINER_URL) no local Docker access is needed and the proxy is not used.
+services:
+  web:
+    image: ${PANEL_IMAGE:-ghcr.io/erikoindra/odoo-backup-panel:latest}
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    # Loopback by default. When nginx runs on another host, set PANEL_BIND to this host's private address
+    # and allow only the nginx host in the firewall (Docker ignores ufw for published ports).
+    ports:
+      - "${PANEL_BIND:-127.0.0.1}:${PANEL_PORT:-8000}:8000"
+    volumes:
+      - panel_data:/data
+    networks: [default, proxy_net]
+
+  worker:
+    image: ${PANEL_IMAGE:-ghcr.io/erikoindra/odoo-backup-panel:latest}
+    build: .
+    restart: unless-stopped
+    command: ["worker"]
+    env_file: .env
+    healthcheck:
+      disable: true # the image's check is for the web port; the worker serves none
+    volumes:
+      - panel_data:/data
+    networks: [default, proxy_net]
+    depends_on: [web]
+
+  socket-proxy:
+    profiles: [proxy]
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      EXEC: 1
+      POST: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [proxy_net]
+
+networks:
+  default: {}
+  proxy_net:
+    internal: true # only the panel can reach the proxy; nothing outside can
+
+volumes:
+  panel_data: {}

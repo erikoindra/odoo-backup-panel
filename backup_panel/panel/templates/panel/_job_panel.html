@@ -1,0 +1,39 @@
+{% load panel_tags %}<div id="job-panel" class="job"{% if job.is_active %} hx-get="{% url 'job_status' job.pk %}{% if standalone %}?page=1{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <div class="job__head">
+    <span class="job__title">{% include "panel/icons/file-archive.svg" %}{{ job.title }}</span>
+    {% include "panel/_job_badge.html" %}
+  </div>
+  {% if job.is_active %}
+  <div class="bar" role="progressbar" aria-label="Progress of {{ job.title }}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ job.progress }}"><span style="width:{{ job.progress }}%"></span></div>
+  {% endif %}
+  {% if job.summary and not job.is_active %}
+  <div class="job__alert">
+    <div class="alert {% if job.status == 'failed' %}alert--bad{% else %}alert--good{% endif %}" role="status">
+      {% if job.status == 'failed' %}{% include "panel/icons/circle-x.svg" %}{% else %}{% include "panel/icons/circle-check.svg" %}{% endif %}
+      <div class="alert__body"><h2>{% if job.status == 'failed' %}Job failed{% else %}Job finished{% endif %}</h2><p>{{ job.summary }}</p></div>
+    </div>
+  </div>
+  {% endif %}
+  {% if job.steps %}
+  <ol class="runsteps">
+    {% for step in job.steps %}
+    <li data-s="{% if step.status == 'running' %}active{% elif step.status == 'done' %}done{% elif step.status == 'failed' %}failed{% else %}todo{% endif %}">
+      <span class="mark">{% if step.status == 'done' %}{% include "panel/icons/circle-check.svg" %}{% elif step.status == 'failed' %}{% include "panel/icons/circle-x.svg" %}{% elif step.status == 'running' %}<span class="spin">{% include "panel/icons/loader-circle.svg" %}</span>{% else %}{% include "panel/icons/circle.svg" %}{% endif %}</span>
+      <span>{{ step.name }}</span>
+      <span class="age">{% if step.status == 'done' %}done{% elif step.status == 'failed' %}failed{% elif step.status == 'running' %}running{% else %}waiting{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ol>
+  {% elif job.is_active %}
+  <p class="job__wait">Waiting for the worker to pick this job up… If it takes long, make sure the worker (<span class="mono">manage.py run_jobs</span>) is running.</p>
+  {% endif %}
+  {% if job.log %}<pre class="log" tabindex="0" aria-label="Job log">{{ job.log }}</pre>{% endif %}
+  <div class="job-foot">
+    <span>{% if job.started_at %}Started {{ job.started_at|date:"j M Y H:i" }}{% else %}Queued since {{ job.created_at|date:"j M Y H:i" }}{% endif %} by {{ job.created_by.get_username }}
+      {% if job.started_at %}· <span data-elapsed{% if job.is_active %} data-since="{{ job.started_at|date:'c' }}"{% endif %}>{{ job.duration|duration }}</span>{% endif %}</span>
+    {% if standalone %}<span>Job #{{ job.pk }}</span>{% else %}<span class="actions">
+      <a href="{% url 'job_status' job.pk %}">Job details #{{ job.pk }}</a>
+      {% if not job.is_active %}<button class="btn btn--ghost btn--sm" type="button" data-dismiss="#job-panel">{% include "panel/icons/x.svg" %}Dismiss</button>{% endif %}
+    </span>{% endif %}
+  </div>
+</div>

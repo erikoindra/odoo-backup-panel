@@ -1,0 +1,14 @@
+line-length = 120
+target-version = "py312"
+src = ["backup_panel"]  # so `panel` and `config` count as first-party imports
+extend-exclude = ["backup_panel/panel/migrations"]
+
+[lint]
+# defaults (pyflakes + pycodestyle errors) plus import order and modern-syntax upgrades
+extend-select = ["I", "UP"]
+
+[lint.per-file-ignores]
+# The spike reports every failure as a finding instead of crashing, so it catches broadly on purpose.
+"scripts/spike_portainer.py" = ["BLE001"]
+# Django's `class Meta` lists (ordering, indexes) are read once by Django, not shared state.
+"*/models.py" = ["RUF012"]

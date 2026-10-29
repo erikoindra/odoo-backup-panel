@@ -1,0 +1,31 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %} · Backup Console</title>
+<link rel="stylesheet" href="{% static 'panel/app.css' %}">
+<script src="{% static 'panel/htmx.min.js' %}" defer></script>
+<script src="{% static 'panel/app.js' %}" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="topbar"><div class="shell topbar__in">
+  <a class="brand" href="{% url 'instance_list' %}"><span class="brand__mark" aria-hidden="true">BC</span>Backup Console</a>
+  {% if user.is_authenticated %}
+  {% with page=request.resolver_match.url_name %}
+  <nav class="nav" aria-label="Main">
+    <a href="{% url 'instance_list' %}"{% if page == 'instance_list' or page == 'instance_detail' or page == 'restore' %} aria-current="page"{% endif %}>Instances</a>
+    <a href="{% url 'job_list' %}"{% if page == 'job_list' or page == 'job_status' %} aria-current="page"{% endif %}>Activity</a>
+  </nav>
+  {% endwith %}
+  <div class="user">
+    <span>{{ user.get_username }}</span>
+    <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn btn--ghost btn--sm" type="submit">Sign out</button></form>
+  </div>
+  {% endif %}
+</div></header>
+{% block main %}{% endblock %}
+<div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

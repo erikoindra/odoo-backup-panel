@@ -1,0 +1,8 @@
+<ul class="checks" data-all-ok="{{ all_ok|yesno:'true,false' }}">
+  {% for check in checks %}
+  <li data-ok="{{ check.ok|yesno:'true,false' }}">
+    {% if check.ok %}{% include "panel/icons/circle-check.svg" %}{% else %}{% include "panel/icons/circle-x.svg" %}{% endif %}
+    <span>{{ check.label }}{% if not check.ok %}<span class="sr-only"> (failed)</span>{% endif %}{% if check.problem %}<br><span class="mono">{{ check.problem }}</span>{% endif %}</span>
+  </li>
+  {% endfor %}
+</ul>

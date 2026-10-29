@@ -1,0 +1,1 @@
+{% if instance %}{% include "panel/_instance_row.html" %}{% else %}<tr data-row data-level="unreadable"><td colspan="6"><span class="status status--bad">{% include "panel/icons/wifi-off.svg" %}Unreadable</span><span class="reason">{{ error }}</span></td></tr>{% endif %}

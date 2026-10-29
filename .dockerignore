@@ -1,0 +1,7 @@
+*
+!backup_panel/
+!docker/
+backup_panel/panel.sqlite3*
+backup_panel/staticfiles/
+**/__pycache__/
+**/*.pyc

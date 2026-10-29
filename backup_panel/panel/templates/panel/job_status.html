@@ -1,0 +1,20 @@
+{% extends "panel/base.html" %}
+{% block title %}Job #{{ job.pk }}{% endblock %}
+{% block main %}
+<main id="main" class="shell">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="{% url 'instance_list' %}">Instances</a><span class="sep" aria-hidden="true">/</span><span>{{ job.endpoint }}</span><span class="sep" aria-hidden="true">/</span><a href="{% url 'instance_detail' job.endpoint job.instance_slug %}">{{ job.instance_slug }}</a><span class="sep" aria-hidden="true">/</span><span aria-current="page">Job #{{ job.pk }}</span></nav>
+  <div class="head">
+    <div>
+      <h1>{{ job.title }}</h1>
+      <div class="meta">
+        {% if job.filename %}<span>Source <b class="mono">{{ job.filename }}</b></span>{% endif %}
+        <span>Server <b>{{ job.endpoint }}</b></span>
+        <span>Container <b class="mono">{{ job.container_name }}</b></span>
+        {% if job.kind == 'restore' %}<span>Neutralize <b>{% if job.neutralize %}yes{% else %}no{% endif %}</b></span>{% endif %}
+      </div>
+    </div>
+    <a class="btn btn--ghost" href="{% url 'instance_detail' job.endpoint job.instance_slug %}">{% include "panel/icons/arrow-left.svg" %}Back to instance</a>
+  </div>
+  <div style="margin-top:var(--s5)">{% include "panel/_job_panel.html" with standalone=True %}</div>
+</main>
+{% endblock %}

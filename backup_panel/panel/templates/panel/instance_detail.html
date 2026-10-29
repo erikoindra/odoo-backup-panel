@@ -1,0 +1,79 @@
+{% extends "panel/base.html" %}
+{% block title %}{{ slug }}{% endblock %}
+{% block main %}
+<main id="main" class="shell">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="{% url 'instance_list' %}">Instances</a><span class="sep" aria-hidden="true">/</span><span>{{ endpoint.name }}</span><span class="sep" aria-hidden="true">/</span><span aria-current="page">{{ slug }}</span></nav>
+  <div class="head">
+    <div>
+      <h1>{{ slug }}</h1>
+      {% if instance %}
+      <div class="meta">
+        <span>Server <b>{{ endpoint.name }}</b></span>
+        <span>Container <b class="mono">{{ instance.container_name }}</b></span>
+        <span>Database <b class="mono">{% if instance.database %}{{ instance.database }}{% else %}all databases{% endif %}</b></span>
+        {% if instance.pg_major %}<span>PostgreSQL <b>{{ instance.pg_major }}</b></span>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% if instance %}
+    <form class="actions" method="post" action="{% url 'backup_now' endpoint.name slug %}">
+      {% csrf_token %}
+      <button class="btn btn--primary" type="submit"{% if not instance.is_running or active_job %} disabled aria-describedby="backup-why"{% endif %}>{% include "panel/icons/play.svg" %}Back up now</button>
+      {% if not instance.is_running %}<span id="backup-why" class="hint">Container stopped.</span>{% elif active_job %}<span id="backup-why" class="hint">Waiting for the running job.</span>{% endif %}
+    </form>
+    {% endif %}
+  </div>
+
+  {% if not instance %}
+  <div class="alert alert--bad" role="status" style="margin-top:var(--s5)">
+    {% include "panel/icons/wifi-off.svg" %}
+    <div class="alert__body"><h2>Server cannot be reached</h2><p>{{ server.error }}</p></div>
+    <a class="btn btn--ghost btn--sm alert__side" href="{% url 'instance_detail' endpoint.name slug %}">{% include "panel/icons/refresh-cw.svg" %}Retry</a>
+  </div>
+  {% else %}
+  <div class="layout">
+    <div class="stack">
+      {% if not instance.is_running %}
+      <div class="alert alert--warn" role="status">
+        {% include "panel/icons/triangle-alert.svg" %}
+        <div class="alert__body"><h2>Backup container stopped</h2><p>The backup list cannot be read. Start the stack again in Portainer, then reload this page.</p></div>
+        <a class="btn btn--ghost btn--sm alert__side" href="{% url 'instance_detail' endpoint.name slug %}">{% include "panel/icons/refresh-cw.svg" %}Reload</a>
+      </div>
+      {% endif %}
+
+      {% if panel_job %}{% include "panel/_job_panel.html" with job=panel_job %}{% endif %}
+
+      {% if instance.is_running %}
+      <section class="panel" aria-labelledby="backups-title">
+        <div class="panel__head"><h2 id="backups-title" class="panel__title">Backups</h2><span class="panel__note">Newest first</span></div>
+        <div id="backups" hx-get="{% url 'backups_partial' endpoint.name slug %}" hx-trigger="load, backups-changed from:body" hx-swap="innerHTML" aria-live="polite">
+          <div class="panel__body" aria-label="Loading the backup list"><span class="skel" style="width:60%"></span><span class="skel" style="width:85%;margin-top:14px"></span><span class="skel" style="width:70%;margin-top:14px"></span></div>
+        </div>
+      </section>
+      {% endif %}
+    </div>
+
+    <aside class="stack" aria-label="Summary">
+      {% include "panel/_side_status.html" %}
+      <div class="panel">
+        <div class="panel__head"><h2 class="panel__title">Last job</h2></div>
+        {% if last_job %}
+        <dl class="facts">
+          <div><dt>Kind</dt><dd>{{ last_job.get_kind_display }}</dd></div>
+          <div><dt>Result</dt><dd>{% with job=last_job %}{% include "panel/_job_badge.html" %}{% endwith %}</dd></div>
+          <div><dt>By</dt><dd>{{ last_job.created_by.get_username }}</dd></div>
+          <div><dt>When</dt><dd>{{ last_job.created_at|date:"j M Y H:i" }}</dd></div>
+        </dl>
+        <p class="note"><a href="{% url 'job_status' last_job.pk %}">View job #{{ last_job.pk }}</a></p>
+        {% else %}
+        <p class="note">No backup or restore has been run from the panel for this instance.</p>
+        {% endif %}
+      </div>
+      <div class="panel">
+        <p class="note"><strong>Before you restore</strong>A restore always creates a new database and never overwrites anything. Make sure there is enough disk space for the database and the filestore, then switch to the new database with <span class="mono">?db=</span> or dbfilter once it is done.</p>
+      </div>
+    </aside>
+  </div>
+  {% endif %}
+</main>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% load panel_tags %}<tr data-row data-level="{{ health.level }}"{% if health.level == 'loading' %} hx-get="{% url 'summary_partial' server.name instance.slug %}{% if refresh %}?refresh=1{% endif %}" hx-trigger="load" hx-swap="outerHTML"{% endif %}>
+  <td><a class="name" href="{% url 'instance_detail' server.name instance.slug %}">{{ instance.slug }}</a><span class="name-sub">{{ instance.container_name }}</span></td>
+  <td class="mono">{% if instance.database %}{{ instance.database }}{% else %}<span class="faint">all databases</span>{% endif %}</td>
+  {% if health.level == 'loading' %}
+  <td><span class="skel" style="width:9rem"></span></td>
+  <td class="num"><span class="skel" style="width:6rem;margin-left:auto"></span></td>
+  {% elif listing.latest %}
+  <td>{{ listing.latest.mtime|date:"j M Y, H:i" }}<span class="cell-sub">{{ listing.latest.mtime|ago }}</span></td>
+  <td class="num">{{ listing.backups|length }} file{{ listing.backups|length|pluralize }}<span class="cell-sub">{{ listing.total_size|filesizeformat }}</span></td>
+  {% else %}
+  <td><span class="faint">–</span></td>
+  <td class="num"><span class="faint">–</span></td>
+  {% endif %}
+  <td>{% include "panel/_health.html" %}{% if health.reason %}<span class="reason">{{ health.reason|truncatechars:140 }}</span>{% endif %}</td>
+  <td class="rowaction"><a class="btn btn--ghost btn--sm" href="{% url 'instance_detail' server.name instance.slug %}">Open<span class="sr-only"> {{ instance.slug }}</span></a></td>
+</tr>

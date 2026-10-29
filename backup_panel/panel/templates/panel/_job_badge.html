@@ -1,0 +1,4 @@
+{% if job.status == 'running' %}<span class="status status--run"><span class="spin">{% include "panel/icons/loader-circle.svg" %}</span>Running</span>
+{% elif job.status == 'queued' %}<span class="status status--idle">{% include "panel/icons/clock.svg" %}Queued</span>
+{% elif job.status == 'done' %}<span class="status status--good">{% include "panel/icons/circle-check.svg" %}Done</span>
+{% else %}<span class="status status--bad">{% include "panel/icons/circle-x.svg" %}Failed</span>{% endif %}

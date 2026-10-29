@@ -1,0 +1,98 @@
+{% extends "panel/base.html" %}
+{% block title %}Restore · {{ slug }}{% endblock %}
+{% block main %}
+<main id="main" class="shell">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="{% url 'instance_list' %}">Instances</a><span class="sep" aria-hidden="true">/</span><span>{{ endpoint.name }}</span><span class="sep" aria-hidden="true">/</span><a href="{% url 'instance_detail' endpoint.name slug %}">{{ slug }}</a><span class="sep" aria-hidden="true">/</span><span aria-current="page">Restore</span></nav>
+  <div class="head">
+    <div>
+      <h1>Restore a backup</h1>
+      <div class="meta"><span>Server <b>{{ endpoint.name }}</b></span><span>Container <b class="mono">{{ instance.container_name }}</b></span></div>
+    </div>
+  </div>
+
+  <ol class="stepper" aria-label="Restore steps">
+    <li data-n="1"><span class="n">1</span>Choose backup</li>
+    <li data-n="2"><span class="n">2</span>Target database</li>
+    <li data-n="3"><span class="n">3</span>Confirm</li>
+    <li data-n="4"><span class="n">4</span>Progress</li>
+  </ol>
+
+  {% if active_job %}
+  <div class="alert alert--warn" role="status">
+    {% include "panel/icons/triangle-alert.svg" %}
+    <div class="alert__body"><h2>A job is still running</h2><p>A stack runs only one backup or restore at a time. <a href="{% url 'job_status' active_job.pk %}">View job #{{ active_job.pk }}</a>.</p></div>
+  </div>
+  {% endif %}
+
+  <form id="wizard" class="wizard" method="post" action="{% url 'restore' endpoint.name slug %}" data-start="{{ start }}" data-check-url="{% url 'restore_check' endpoint.name slug %}" novalidate>
+    {% csrf_token %}
+
+    <section class="step" data-step="1" aria-labelledby="s1-title">
+      <div class="panel">
+        <div class="panel__head"><h2 id="s1-title" class="panel__title">1. Choose backup</h2><span class="panel__note">{{ listing.backups|length }} file{{ listing.backups|length|pluralize }} · newest first</span></div>
+        <fieldset class="optlist" style="border:0;margin:0;padding:0;min-width:0">
+          <legend class="sr-only">Backup to restore</legend>
+          {% for backup in listing.backups %}
+          <label class="opt">
+            <input type="radio" name="filename" value="{{ backup.name }}" data-suggest="{{ backup.suggested_db }}"{% if backup.name == selected %} checked{% endif %}>
+            <span><span class="opt__name">{{ backup.name }}</span><span class="opt__sub">{{ backup.mtime|date:"j M Y, H:i" }}</span></span>
+            <span class="opt__size">{{ backup.size|filesizeformat }}</span>
+          </label>
+          {% endfor %}
+        </fieldset>
+        {% if form.filename.errors %}<p class="err" role="alert" style="padding:var(--s2) var(--s4)">{{ form.filename.errors.0 }}</p>{% endif %}
+        <div class="foot-actions"><a class="btn btn--ghost" href="{% url 'instance_detail' endpoint.name slug %}">Cancel</a><button class="btn btn--primary" type="button" data-go="2">Next</button></div>
+      </div>
+    </section>
+
+    <section class="step" data-step="2" aria-labelledby="s2-title">
+      <div class="panel">
+        <div class="panel__head"><h2 id="s2-title" class="panel__title">2. Target database</h2></div>
+        <div class="panel__body">
+          <div class="field">
+            <label for="new-db">New database name</label>
+            <input id="new-db" name="new_db" class="input mono" autocomplete="off" spellcheck="false" value="{{ form.new_db.value|default:'' }}"{% if form.new_db.errors %} aria-invalid="true"{% endif %} aria-describedby="new-db-hint new-db-error">
+            <p id="new-db-hint" class="hint">Lowercase letters, digits and underscores. Must not exist yet: a restore never overwrites a database.</p>
+            <p id="new-db-error" class="err" role="alert">{{ form.new_db.errors.0 }}</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" name="neutralize"{% if form.neutralize.value %} checked{% endif %}>
+            <span><strong>Neutralize database</strong><span>Runs <span class="mono">odoo neutralize</span> on the new database: outgoing mail, cron jobs and integrations are disabled. Recommended for copies of production. Needs an Odoo container that uses the same data volume.</span></span>
+          </label>
+        </div>
+        <div class="js-only">
+          <div class="panel__head" style="border-top:var(--rule)"><h3 class="panel__title">Checks</h3>
+            <button class="btn btn--ghost btn--sm" type="button" id="run-checks" hx-post="{% url 'restore_check' endpoint.name slug %}" hx-target="#checks" hx-swap="innerHTML" hx-trigger="click, recheck">{% include "panel/icons/refresh-cw.svg" %}Run checks again</button>
+          </div>
+          <div id="checks" aria-live="polite"><p class="checks--wait">Checks run when this step opens.</p></div>
+        </div>
+        <div class="foot-actions"><button class="btn btn--ghost" type="button" data-go="1">Back</button><button class="btn btn--primary" type="button" data-go="3" data-needs-checks>Next</button></div>
+      </div>
+    </section>
+
+    <section class="step" data-step="3" aria-labelledby="s3-title">
+      <div class="panel">
+        <div class="panel__head"><h2 id="s3-title" class="panel__title">3. Confirm</h2></div>
+        <div class="panel__body">
+          <dl class="summary js-only">
+            <div><dt>Source</dt><dd data-sum="filename"></dd></div>
+            <div><dt>New database</dt><dd data-sum="new_db"></dd></div>
+            <div><dt>Neutralize</dt><dd data-sum="neutralize"></dd></div>
+            <div><dt>Server · stack</dt><dd>{{ endpoint.name }} · {{ slug }}</dd></div>
+          </dl>
+          <div class="alert alert--warn" style="margin:var(--s4) 0">
+            {% include "panel/icons/triangle-alert.svg" %}
+            <div class="alert__body"><h2>What will happen</h2><p>A new database and filestore are created. Existing databases are not touched and nothing is deleted. Afterwards, open the new database with <span class="mono">?db=</span> or dbfilter yourself.</p></div>
+          </div>
+          <div class="field">
+            <label for="confirm-db">Type the new database name to confirm</label>
+            <input id="confirm-db" name="confirm" class="input mono" autocomplete="off" spellcheck="false"{% if form.confirm.errors %} aria-invalid="true"{% endif %} aria-describedby="confirm-error">
+            <p id="confirm-error" class="err" role="alert">{{ form.confirm.errors.0 }}</p>
+          </div>
+        </div>
+        <div class="foot-actions"><button class="btn btn--ghost" type="button" data-go="2">Back</button><button class="btn btn--danger" type="submit"{% if active_job %} disabled{% endif %}>{% include "panel/icons/rotate-ccw.svg" %}Restore now</button></div>
+      </div>
+    </section>
+  </form>
+</main>
+{% endblock %}

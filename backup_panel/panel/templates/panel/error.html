@@ -1,0 +1,13 @@
+{% extends "panel/base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block main %}
+<main id="main" class="shell">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="{% url 'instance_list' %}">Instances</a></nav>
+  <h1 style="font-size:var(--fs-20);font-weight:600">{{ title }}</h1>
+  <div class="alert alert--bad" role="alert" style="margin-top:var(--s4)">
+    {% include "panel/icons/triangle-alert.svg" %}
+    <div class="alert__body"><p>{{ message }}</p></div>
+  </div>
+  <p><a class="btn btn--ghost" href="{{ back_url }}">{% include "panel/icons/arrow-left.svg" %}Back</a></p>
+</main>
+{% endblock %}

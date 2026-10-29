@@ -1,0 +1,77 @@
+{% extends "panel/base.html" %}
+{% block title %}Instances{% endblock %}
+{% block main %}
+<main id="main" class="shell">
+  <div class="pagehead">
+    <div>
+      <h1>Instances</h1>
+      <p>Discovered from the odoo-backup container of every connected server.</p>
+    </div>
+    {% if servers %}
+    <a class="btn btn--ghost" href="{% url 'instance_list' %}?refresh=1">{% include "panel/icons/refresh-cw.svg" %}Refresh status</a>
+    {% endif %}
+  </div>
+
+  {% if not configured %}
+  <div class="panel emptystate">
+    <div class="emptystate__icon">{% include "panel/icons/server.svg" %}</div>
+    <h2>No server connected yet</h2>
+    <p>Set <span class="mono">PORTAINER_URL</span> and <span class="mono">PORTAINER_API_KEY</span>, or <span class="mono">DOCKER_ENDPOINTS</span>, then reload this page.</p>
+  </div>
+  {% endif %}
+
+  {% if servers %}
+  <div class="toolbar">
+    <div class="search">
+      {% include "panel/icons/search.svg" %}
+      <input class="input" type="search" data-search placeholder="Search instances, databases or servers" aria-label="Search instances, databases or servers" style="padding-left:36px">
+    </div>
+    <span id="result-count" class="panel__note" aria-live="polite">{{ instance_count }} instance{{ instance_count|pluralize }} on {{ servers|length }} server{{ servers|length|pluralize }}</span>
+    <span id="health-count" class="panel__note" aria-live="polite"></span>
+  </div>
+  {% endif %}
+
+  {% for group in groups %}
+  {% with server=group.server %}
+  <section class="panel server" data-group="{{ server.name }}" aria-labelledby="server-{{ forloop.counter }}">
+    <div class="server-head">
+      <h2 id="server-{{ forloop.counter }}">{% include "panel/icons/server.svg" %}{{ server.name }}</h2>
+      {% if server.error %}
+      <span class="status status--bad">{% include "panel/icons/wifi-off.svg" %}Unreachable</span>
+      {% else %}
+      <span class="status status--good">{% include "panel/icons/circle-check.svg" %}Connected · {{ server.source_label }}</span>
+      {% endif %}
+    </div>
+
+    {% if server.error %}
+    <div class="server-body">
+      <div class="alert alert--bad" role="status">
+        {% include "panel/icons/wifi-off.svg" %}
+        <div class="alert__body"><h2>Server cannot be reached</h2><p>{{ server.error }} The other servers still work.</p></div>
+        <a class="btn btn--ghost btn--sm alert__side" href="{% url 'instance_list' %}">{% include "panel/icons/refresh-cw.svg" %}Retry</a>
+      </div>
+    </div>
+    {% else %}
+      {% if server.warning %}
+      <div class="server-body">
+        <div class="alert alert--warn" role="status">{% include "panel/icons/triangle-alert.svg" %}<div class="alert__body"><p>{{ server.warning }}</p></div></div>
+      </div>
+      {% endif %}
+      {% if group.rows %}
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Instance</th><th>Database</th><th>Last backup</th><th class="num">Files</th><th>Status</th><th><span class="sr-only">Open</span></th></tr></thead>
+          <tbody>
+            {% for row in group.rows %}{% include "panel/_instance_row.html" with instance=row.instance health=row.health %}{% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% elif not server.warning %}
+      <div class="emptystate"><p>No odoo-backup containers on this server.</p></div>
+      {% endif %}
+    {% endif %}
+  </section>
+  {% endwith %}
+  {% endfor %}
+</main>
+{% endblock %}

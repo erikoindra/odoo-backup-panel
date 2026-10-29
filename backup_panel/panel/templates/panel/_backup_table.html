@@ -1,0 +1,48 @@
+{% load panel_tags %}{% if error %}
+<div class="alert alert--bad" role="status" style="margin:var(--s4)">
+  {% include "panel/icons/wifi-off.svg" %}
+  <div class="alert__body"><h2>The backup list cannot be read</h2><p>{{ error }}</p></div>
+  <button class="btn btn--ghost btn--sm alert__side" type="button" hx-get="{% url 'backups_partial' endpoint.name slug %}?refresh=1" hx-target="#backups" hx-swap="innerHTML">{% include "panel/icons/refresh-cw.svg" %}Retry</button>
+</div>
+{% elif not instance.is_running %}
+<div class="alert alert--warn" role="status" style="margin:var(--s4)">
+  {% include "panel/icons/triangle-alert.svg" %}
+  <div class="alert__body"><h2>Backup container stopped</h2><p>The backup list cannot be read while the container is stopped.</p></div>
+</div>
+{% elif not listing.backups %}
+<div class="emptystate">
+  <div class="emptystate__icon">{% include "panel/icons/inbox.svg" %}</div>
+  <h2>No backups yet</h2>
+  <p>The first backup runs on schedule{% if instance.schedule %} ({{ instance.schedule }}){% endif %}, or start one now.</p>
+</div>
+{% else %}
+<div class="tablewrap">
+  <table>
+    <thead><tr><th>File</th><th class="num">Size</th><th>Created</th><th>Age</th><th><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>
+      {% for backup in listing.backups %}
+      <tr>
+        <td><span class="file">{% include "panel/icons/file-archive.svg" %}<span class="mono">{{ backup.name }}</span></span></td>
+        <td class="num">{{ backup.size|filesizeformat }}</td>
+        <td>{{ backup.mtime|date:"j M Y, H:i" }}</td>
+        <td class="age">{{ backup.mtime|ago }}</td>
+        <td class="rowaction"><div class="rowacts">
+          <a class="btn btn--ghost btn--sm" href="{% url 'download' endpoint.name slug backup.name %}" download data-download="{{ backup.name }}">{% include "panel/icons/download.svg" %}Download<span class="sr-only"> {{ backup.name }}</span></a>
+          <a class="btn btn--ghost btn--sm" href="{% url 'restore' endpoint.name slug %}?file={{ backup.name|urlencode }}">{% include "panel/icons/rotate-ccw.svg" %}Restore<span class="sr-only"> {{ backup.name }}</span></a>
+        </div></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% if listing %}
+<div class="panel__foot">
+  <span>{{ listing.backups|length }} file{{ listing.backups|length|pluralize }} · {{ listing.total_size|filesizeformat }}{% if instance.retention_days %} · retention {{ instance.retention_days }} days{% endif %} · read at {{ listing.read_at|time:"H:i:s" }}</span>
+  <span class="actions">
+    {% if listing.backups %}<span>An interrupted download starts over; there is no resume.</span>{% endif %}
+    <button class="btn btn--ghost btn--sm" type="button" hx-get="{% url 'backups_partial' endpoint.name slug %}?refresh=1" hx-target="#backups" hx-swap="innerHTML">{% include "panel/icons/refresh-cw.svg" %}Reload</button>
+  </span>
+</div>
+{% endif %}
+{% include "panel/_side_status.html" with oob=True %}

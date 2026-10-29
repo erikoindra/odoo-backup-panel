@@ -1,0 +1,29 @@
+{% extends "panel/base.html" %}
+{% block title %}Activity{% endblock %}
+{% block main %}
+<main id="main" class="shell">
+  <div class="pagehead"><div><h1>Activity</h1><p>Every download, backup and restore is recorded: who, when, what, and the result.</p></div></div>
+  {% if jobs %}
+  <div class="panel">
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Job</th><th>Server · instance</th><th>By</th><th>When</th><th>Result</th></tr></thead>
+        <tbody>
+          {% for job in jobs %}
+          <tr>
+            <td><a class="name" href="{% url 'job_status' job.pk %}">#{{ job.pk }} {{ job.title }}</a><span class="cell-sub">{{ job.get_kind_display }}{% if job.neutralize %} · neutralized{% endif %}</span></td>
+            <td class="mono">{{ job.endpoint }} · {{ job.instance_slug }}</td>
+            <td>{{ job.created_by.get_username }}</td>
+            <td>{{ job.created_at|date:"j M Y, H:i" }}</td>
+            <td>{% include "panel/_job_badge.html" %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="panel emptystate"><div class="emptystate__icon">{% include "panel/icons/inbox.svg" %}</div><h2>No activity yet</h2><p>Downloads, backups and restores run from the panel appear here.</p></div>
+  {% endif %}
+</main>
+{% endblock %}

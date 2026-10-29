@@ -1,0 +1,10 @@
+{% extends "panel/base.html" %}
+{% block title %}Locked{% endblock %}
+{% block main %}
+<main id="main" class="auth">
+  <div class="panel panel__body" role="alert">
+    <h1>Too many attempts</h1>
+    <p class="lead">Too many failed sign-in attempts from this address. Try again in 1 hour.</p>
+  </div>
+</main>
+{% endblock %}

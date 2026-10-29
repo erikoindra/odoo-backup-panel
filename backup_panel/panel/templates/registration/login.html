@@ -1,0 +1,18 @@
+{% extends "panel/base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block main %}
+<main id="main" class="auth">
+  <div class="panel panel__body">
+    <h1>Sign in</h1>
+    <p class="lead">Access is limited to admins. Every access and action is recorded.</p>
+    <form method="post" action="{% url 'login' %}">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next }}">
+      <div class="field"><label for="id_username">Username</label><input id="id_username" class="input" name="username" autocomplete="username" required autofocus aria-describedby="login-error"{% if form.errors %} aria-invalid="true"{% endif %} value="{{ form.username.value|default:'' }}"></div>
+      <div class="field"><label for="id_password">Password</label><input id="id_password" class="input" name="password" type="password" autocomplete="current-password" required aria-describedby="login-error"{% if form.errors %} aria-invalid="true"{% endif %}></div>
+      <p id="login-error" class="err" role="alert" style="margin-top:var(--s3)">{% if form.non_field_errors %}Wrong username or password.{% elif form.errors %}Enter your username and password.{% endif %}</p>
+      <button class="btn btn--primary" type="submit" style="width:100%;margin-top:var(--s4)">Sign in</button>
+    </form>
+  </div>
+</main>
+{% endblock %}

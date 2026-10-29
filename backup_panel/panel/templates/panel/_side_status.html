@@ -1,0 +1,12 @@
+{% load panel_tags %}<div id="side-status" class="panel"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <div class="panel__head"><h2 class="panel__title">Status</h2>{% include "panel/_health.html" %}</div>
+  {% if health.reason %}<p class="panel__body panel__note">{{ health.reason }}</p>{% endif %}
+  <dl class="facts">
+    <div><dt>Backup container</dt><dd>{{ instance.status_label }}</dd></div>
+    <div><dt>Last backup</dt><dd>{% if listing.latest %}{{ listing.latest.mtime|ago }}{% else %}–{% endif %}</dd></div>
+    <div><dt>Expected interval</dt><dd>{{ instance.config.CRON_SCHEDULE|expected }}</dd></div>
+    <div><dt>Cron schedule</dt><dd>{% if instance.config.CRON_SCHEDULE %}{{ instance.config.CRON_SCHEDULE }}{% else %}–{% endif %}</dd></div>
+    <div><dt>Retention</dt><dd>{% if instance.retention_days is None %}–{% elif instance.retention_days == 0 %}no automatic deletion{% else %}{{ instance.retention_days }} days{% endif %}</dd></div>
+    <div><dt>Time zone</dt><dd>{% if instance.config.TZ %}{{ instance.config.TZ }}{% else %}–{% endif %}</dd></div>
+  </dl>
+</div>
