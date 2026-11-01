@@ -8,7 +8,8 @@ All text is in English; server, stack, and database names in the examples are ge
 | Page | URL | Contents |
 |---|---|---|
 | Instances | `/instances/` | one panel per server; one table: Instance, Database, Last backup (+age), Files (count, total size), Status, Open. Search, count per status, "Refresh status" (`?refresh=1`). |
-| Detail | `/e/<server>/<stack>/` | title + meta, **Back up now**; left: job panel (if any) and the backup list (File, Size, Created, Age, Download, Restore); right: Status, Last job, "Before you restore" note. |
+| Detail | `/e/<server>/<stack>/` | title + meta, **Back up now**; left: job panel (if any) and the backup list (File, Size, Created, Age, Download, Restore; for superusers also a checkbox column and **Delete selected**); right: Status, Last job, "Before you restore" note. |
+| Delete backups | `/e/<server>/<stack>/delete/?filename=…` | superusers only: the chosen files, their total size, and a field where `DELETE` is typed. Opened from "Delete selected" in the backup table. |
 | Restore wizard | `/e/<server>/<stack>/restore/?file=` | 4 steps: Choose backup, Target database, Confirm, Progress (job page). |
 | Job | `/jobs/<id>/` | full job panel; polls every 2 seconds while active. |
 | Activity | `/jobs/` | every download, backup, restore: who, when, result. |
@@ -68,3 +69,14 @@ Contrast checked by script (48 pairs). Status is always icon + word. Visible foc
 `aria-live` region, 44px targets on touch screens, `prefers-reduced-motion` disables animation, 16px inputs
 on phones. Two columns on the detail page start at 1140 px; below that the side cards drop underneath.
 Headless checks and their screenshots: `docs/testing.md` section 2b.
+
+## Deleting backups
+
+Only superusers see the controls: a checkbox column (with a "select all" box in the header) and a
+**Delete selected** button under the table. The newest backup of each database has a disabled box with the
+reason ("The newest backup of its database is kept"); with script, the button stays disabled until a file is
+ticked and shows the count ("Delete selected (2)"). The button opens a page of its own that lists the files again,
+says it cannot be undone, and asks for the word `DELETE`; a wrong word shows the error under the field and keeps the
+list. After the confirmation the person is back on the instance page, where the job panel shows the delete like a
+backup, and the table reloads by itself when it ends. A refusal (nothing selected, the newest, a name that is not
+in the list, more than 50 files) is a page of its own with the reasons and no form.

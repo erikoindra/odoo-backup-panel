@@ -10,6 +10,7 @@
         {% if job.filename %}<span>Source <b class="mono">{{ job.filename }}</b></span>{% endif %}
         <span>Server <b>{{ job.endpoint }}</b></span>
         <span>Container <b class="mono">{{ job.container_name }}</b></span>
+        {% if job.kind == 'delete' %}<span>Files <b>{{ job.files|length }}</b></span>{% endif %}
         {% if job.kind == 'restore' %}<span>Neutralize <b>{% if job.neutralize %}yes{% else %}no{% endif %}</b></span>{% endif %}
       </div>
     </div>

@@ -33,7 +33,8 @@ MVP non-goals (do not build unless asked):
 - Uploading a zip from outside.
 - Editing the cron schedule/retention from the panel (stays in Portainer).
 - Tiered roles, 2FA, notifications.
-- Deleting backups from the panel.
+- Deleting backups by rule (older than N days, keep N files): that stays with `RETENTION_DAYS`. Deleting chosen
+  files by hand was added later (5.4, D13).
 - Public landing page.
 - An agent of our own on every host (Portainer or socket-proxy is used instead).
 
@@ -271,10 +272,29 @@ Worker steps (`Job.steps` records progress, `Job.log` holds the output):
 Failure midway: **nothing is deleted automatically**. The summary states exactly what already
 exists ("database X was created, but dump.sql failed to load", "…and the dump loaded, but the
 filestore was not copied; inspect the folders X and .restore-X"). The panel has no command at all
-that deletes a database or folder.
+that deletes a database or folder (it deletes backup zips only, 5.4).
 
 Note: the restore holds the backup lock while the dump loads. A large restore that collides with
 the scheduled backup time makes that night's backup fail ("another backup is already running").
+
+### 5.4 Delete backup files (D13)
+Superusers only (403 for anyone else; the controls are not shown to them). Permanent, and never more than zips.
+1. In the backup table, tick the zips (the newest zip of each database has a disabled box) and press
+   "Delete selected": GET `/e/<endpoint>/<slug>/delete/?filename=…&filename=…` shows the files again, with
+   their total size, and asks for the word `DELETE`. The container must be running.
+2. POST to the same URL (login, superuser, CSRF) with the repeated `filename` and `confirm`. The list is read
+   again (no cache). Every name must match the zip name pattern and be in that list, at most 50 files, and the
+   newest zip of each database (the part of the name before `_YYYYMMDD_HHMMSS.zip`) is refused; a zip that does
+   not follow the naming is its own group and so is refused too. Then `Job(kind=delete, files=[…])` is queued,
+   unless a backup, restore or delete is already queued or running for the stack (409). The response redirects
+   to the instance page, whose job panel follows the job.
+3. Worker: read `/backups` again and check again (a file no longer there, or the newest of its database:
+   "Nothing was changed"). Then one exec in the backup container: `flock -n` on `/backups/.odoo-backup.lock`
+   (held: "A backup is running, so nothing was deleted"), check every name once more in the shell (a plain zip
+   name, no path, no leading dot) and that every file exists, then `rm -f --` each. The names arrive as one
+   environment variable, `FILES`; the script text holds no name. Steps: Check backup files, Delete files, Done.
+   Summary: "Deleted N backup file(s) (size)." The log has one `deleted <name>` line per file.
+Never removed: databases, filestore folders, the lock file, files that are not zips, anything with a slash in its name.
 
 ---
 
@@ -322,7 +342,7 @@ docker-compose.yml
 ### Model
 ```python
 class Job(models.Model):
-    # kind: download | backup | restore
+    # kind: download | backup | restore | delete
     # status: queued | running | done | failed
     kind, status
     endpoint        = CharField
@@ -331,6 +351,7 @@ class Job(models.Model):
     filename        = CharField(blank=True)   # download/restore
     target_db       = CharField(blank=True)   # restore
     neutralize      = BooleanField(default=False)  # restore: run `odoo neutralize` afterwards (D11)
+    files           = JSONField(default=list)      # delete: the zips to remove (D13)
     steps           = JSONField(default=list) # [{"name", "status", "at"}]
     summary         = CharField(blank=True)   # the outcome in one sentence, or why it failed
     log             = TextField(blank=True)
@@ -354,6 +375,7 @@ No Instance model (live discovery).
 | POST | `/e/<endpoint>/<slug>/backup` | backup_now | creates a Job |
 | GET/POST | `/e/<endpoint>/<slug>/restore/` | restore | wizard (`?file=` preselects a zip); POST creates the Job |
 | POST | `/e/<endpoint>/<slug>/restore/check/` | restore_check | HTMX fragment: the wizard's checks (database, folder, job, Odoo container) |
+| GET/POST | `/e/<endpoint>/<slug>/delete/` | delete_backups | superusers only; GET shows the confirmation for the `filename` values, POST queues the delete Job |
 | GET | `/jobs/<id>/` | job_status | page, or the job panel fragment for HTMX; polling stops at done/failed |
 | GET | `/jobs/` | job_list | audit (Step 8) |
 

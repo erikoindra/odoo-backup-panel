@@ -19,7 +19,14 @@ VOID = {"meta", "link", "br", "hr", "img", "input", "path", "ellipse", "rect", "
 ENDPOINT = Endpoint("vps-1", "portainer", "https://p.example.com:443/api/endpoints/4/docker", "k")
 SLUG = "acme-staging-backup"
 ZIP = "acme_staging_20261028_072000.zip"
-LISTING = BackupListing([Backup(ZIP, 6740230, datetime(2026, 10, 28, 0, 20, tzinfo=UTC))], datetime.now(UTC))
+OLDER = "acme_staging_20261027_072000.zip"
+LISTING = BackupListing(
+    [
+        Backup(ZIP, 6740230, datetime(2026, 10, 28, 0, 20, tzinfo=UTC)),
+        Backup(OLDER, 6600000, datetime(2026, 10, 27, 0, 20, tzinfo=UTC)),
+    ],
+    datetime.now(UTC),
+)
 
 
 class Page(HTMLParser):
@@ -95,7 +102,7 @@ def check(case, html, name):
 class MarkupTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.user = get_user_model().objects.create_user("admin", password="x" * 14)
+        cls.user = get_user_model().objects.create_superuser("admin", password="x" * 14)
 
     def setUp(self):
         self.server = Server("vps-1", "portainer", [make_instance()])
@@ -146,6 +153,7 @@ class MarkupTests(TestCase):
             "backups fragment": reverse("backups_partial", args=["vps-1", SLUG]),
             "summary fragment": reverse("summary_partial", args=["vps-1", SLUG]),
             "restore wizard": reverse("restore", args=["vps-1", SLUG]),
+            "delete confirmation": reverse("delete_backups", args=["vps-1", SLUG]) + f"?filename={OLDER}",
             "job list": reverse("job_list"),
         }
         for label, job in (
@@ -194,6 +202,14 @@ class MarkupTests(TestCase):
         )
         self.assertEqual(bad.status_code, 400)
         check(self, bad.content.decode(), "restore wizard with errors")
+        delete_url = reverse("delete_backups", args=["vps-1", SLUG])
+        for label, query in (("nothing selected", ""), ("the newest", f"?filename={ZIP}")):
+            refused = self.client.get(delete_url + query)
+            self.assertEqual(refused.status_code, 400, label)
+            check(self, refused.content.decode(), f"delete: {label}")
+        wrong_word = self.client.post(delete_url, {"filename": [OLDER], "confirm": "no"})
+        self.assertEqual(wrong_word.status_code, 400)
+        check(self, wrong_word.content.decode(), "delete with the wrong word")
         check(
             self,
             self.client.post(reverse("backup_now", args=["vps-1", SLUG])).content.decode() or "<p></p>",
@@ -221,6 +237,8 @@ class MarkupTests(TestCase):
                 reverse("instance_list"),
                 reverse("instance_detail", args=["vps-1", SLUG]),
                 reverse("restore", args=["vps-1", SLUG]),
+                reverse("backups_partial", args=["vps-1", SLUG]),  # the table: checkboxes and the delete form
+                reverse("delete_backups", args=["vps-1", SLUG]) + f"?filename={OLDER}",
             )
         )
         js = (pathlib.Path(dockerops.__file__).parent / "static/panel/app.js").read_text()
@@ -241,6 +259,10 @@ class MarkupTests(TestCase):
             "data-download",
             "data-dismiss",
             "data-since",
+            "data-select-all",
+            "data-delete-box",
+            "data-delete-submit",
+            "data-delete-label",
         ):
             self.assertIn(attribute, js + pages, attribute)
         for field in ("new_db", "confirm", "neutralize", "filename"):

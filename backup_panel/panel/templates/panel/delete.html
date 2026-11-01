@@ -1,0 +1,62 @@
+{% extends "panel/base.html" %}
+{% block title %}Delete backups · {{ slug }}{% endblock %}
+{% block main %}
+<main id="main" class="shell">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="{% url 'instance_list' %}">Instances</a><span class="sep" aria-hidden="true">/</span><span>{{ endpoint.name }}</span><span class="sep" aria-hidden="true">/</span><a href="{% url 'instance_detail' endpoint.name slug %}">{{ slug }}</a><span class="sep" aria-hidden="true">/</span><span aria-current="page">Delete backups</span></nav>
+  <div class="head">
+    <div>
+      <h1>Delete backups</h1>
+      <div class="meta"><span>Server <b>{{ endpoint.name }}</b></span><span>Container <b class="mono">{{ instance.container_name }}</b></span></div>
+    </div>
+  </div>
+
+  {% if active_job %}
+  <div class="alert alert--warn" role="status" style="margin-top:var(--s5)">
+    {% include "panel/icons/triangle-alert.svg" %}
+    <div class="alert__body"><h2>A job is still running</h2><p>A stack runs only one backup, restore or delete at a time. <a href="{% url 'job_status' active_job.pk %}">View job #{{ active_job.pk }}</a>.</p></div>
+  </div>
+  {% endif %}
+
+  {% if problems %}
+  <div class="alert alert--bad" role="alert" style="margin-top:var(--s5)">
+    {% include "panel/icons/circle-x.svg" %}
+    <div class="alert__body"><h2>Nothing can be deleted yet</h2><ul class="plain">{% for problem in problems %}<li>{{ problem }}</li>{% endfor %}</ul></div>
+  </div>
+  <p style="margin-top:var(--s4)"><a class="btn btn--ghost" href="{% url 'instance_detail' endpoint.name slug %}">{% include "panel/icons/arrow-left.svg" %}Back to instance</a></p>
+  {% else %}
+  <div class="alert alert--warn" style="margin-top:var(--s5)">
+    {% include "panel/icons/triangle-alert.svg" %}
+    <div class="alert__body"><h2>This cannot be undone</h2><p>{{ backups|length }} backup file{{ backups|length|pluralize }} ({{ total_size|filesizeformat }}) will be permanently removed from <span class="mono">/backups</span>. Databases and filestores are not touched. The newest backup of each database is always kept.</p></div>
+  </div>
+
+  <form method="post" action="{% url 'delete_backups' endpoint.name slug %}">
+    {% csrf_token %}
+    <div class="panel">
+      <div class="panel__head"><h2 class="panel__title">Files to delete</h2><span class="panel__note">{{ backups|length }} selected</span></div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>File</th><th class="num">Size</th><th>Created</th></tr></thead>
+          <tbody>
+            {% for backup in backups %}
+            <tr>
+              <td><span class="file">{% include "panel/icons/file-archive.svg" %}<span class="mono">{{ backup.name }}</span></span><input type="hidden" name="filename" value="{{ backup.name }}"></td>
+              <td class="num">{{ backup.size|filesizeformat }}</td>
+              <td>{{ backup.mtime|date:"j M Y, H:i" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="panel__body">
+        <div class="field">
+          <label for="confirm-delete">Type DELETE to confirm</label>
+          <input id="confirm-delete" name="confirm" class="input mono" autocomplete="off" spellcheck="false" placeholder="DELETE"{% if form.confirm.errors %} aria-invalid="true"{% endif %} aria-describedby="confirm-delete-error">
+          <p id="confirm-delete-error" class="err" role="alert">{{ form.confirm.errors.0 }}</p>
+        </div>
+      </div>
+      <div class="foot-actions"><a class="btn btn--ghost" href="{% url 'instance_detail' endpoint.name slug %}">Cancel</a><button class="btn btn--danger" type="submit"{% if active_job %} disabled{% endif %}>{% include "panel/icons/trash-2.svg" %}Delete {{ backups|length }} file{{ backups|length|pluralize }}</button></div>
+    </div>
+  </form>
+  {% endif %}
+</main>
+{% endblock %}

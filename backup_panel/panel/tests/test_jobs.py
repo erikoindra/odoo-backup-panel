@@ -33,6 +33,8 @@ class Lab:
         self.backup_exit = 0
         self.neutralize_exit = 0
         self.neutralized = []
+        self.stats = {}  # /backups listing: name -> (size, mtime as epoch seconds)
+        self.delete_exit = 0
         self.backup_text = b"[10:00:00] finished: 1 database(s) backed up to /backups\n"
         self.exec_calls = []
         self.helper_calls = []
@@ -52,6 +54,21 @@ class Lab:
             if self.dump_fails:
                 return 1, b"db-created\n", b"psql: ERROR: syntax error"
             return 0, b"db-created\ndump-loaded\n", b""
+        if argv[:2] == ["sh", "-c"] and argv[2] == dockerops.LIST_BACKUPS_SCRIPT:
+            lines = [f"/backups/{name}|{size}|{mtime}" for name, (size, mtime) in self.stats.items()]
+            return 0, ("\n".join(lines) + "\n").encode(), b""
+        if argv[:2] == ["sh", "-c"] and argv[2] == jobs.DELETE_SCRIPT:
+            if self.locked:
+                return 4, b"", b""
+            names = env["FILES"].split()
+            gone = [n for n in names if n not in self.stats]
+            if gone:
+                return 5, b"", f"missing: {gone[0]}\n".encode()
+            if self.delete_exit:
+                return self.delete_exit, f"deleted {names[0]}\n".encode(), b"rm: boom"
+            for name in names:
+                del self.stats[name]
+            return 0, "".join(f"deleted {n}\n" for n in names).encode(), b""
         if argv[:2] == ["sh", "-c"] and argv[2] == jobs.NEUTRALIZE_SCRIPT:
             if self.neutralize_exit:
                 return self.neutralize_exit, b"", b"odoo: error: boom"
@@ -367,6 +384,135 @@ class NeutralizeJobTests(JobTestCase):
         self.assertEqual([s["status"] for s in job.steps], ["done", "done", "done", "failed", "todo"])
         self.assertIn("acme_copy", self.lab.databases)  # nothing deleted
         self.assertIn("acme_copy", self.lab.filestores)
+
+
+SHOP_NEW = "shop_20261029_020000.zip"
+SHOP_MID = "shop_20261028_020000.zip"
+SHOP_OLD = "shop_20261027_020000.zip"
+WIKI_NEW = "wiki_20261029_030000.zip"
+WIKI_OLD = "wiki_20261028_030000.zip"
+
+
+class DeleteJobTests(JobTestCase):
+    def setUp(self):
+        super().setUp()
+        self.lab.stats = {
+            SHOP_NEW: (3_000_000, 1_793_000_000),
+            SHOP_MID: (2_000_000, 1_792_900_000),
+            SHOP_OLD: (1_000_000, 1_792_800_000),
+            WIKI_NEW: (500_000, 1_793_000_100),
+            WIKI_OLD: (400_000, 1_792_900_100),
+        }
+
+    def delete_job(self, *names):
+        return self.job(Job.Kind.DELETE, files=list(names))
+
+    def delete_execs(self):
+        return [e for e in self.api.execs.values() if e["cmd"][-1] == jobs.DELETE_SCRIPT]
+
+    def test_the_chosen_files_are_removed_and_nothing_else(self):
+        job = self.run_job(self.delete_job(SHOP_OLD, SHOP_MID))
+        self.assertEqual(job.status, Job.Status.DONE, job.summary)
+        self.assertEqual(set(self.lab.stats), {SHOP_NEW, WIKI_NEW, WIKI_OLD})
+        self.assertEqual(job.summary, "Deleted 2 backup files (2.9 MB).")
+        self.assertEqual([s["status"] for s in job.steps], ["done"] * 3)
+        self.assertIn(f"deleted {SHOP_OLD}", job.log)
+        self.assertIn(f"to delete: {SHOP_OLD}", job.log)
+
+    def test_one_file_is_singular(self):
+        job = self.run_job(self.delete_job(SHOP_OLD))
+        self.assertEqual(job.summary, "Deleted 1 backup file (976.6 KB).")
+
+    def test_the_names_reach_the_script_only_as_a_variable(self):
+        self.run_job(self.delete_job(SHOP_OLD, SHOP_MID))
+        (execution,) = self.delete_execs()
+        self.assertEqual(execution["env"]["FILES"], f"{SHOP_OLD} {SHOP_MID}")
+        self.assertNotIn("shop_", jobs.DELETE_SCRIPT)
+        self.assertEqual(execution["container"], self.instance.container_id)
+
+    def test_a_name_asked_for_twice_is_removed_once(self):
+        job = self.run_job(self.delete_job(SHOP_OLD, SHOP_OLD))
+        self.assertEqual(job.status, Job.Status.DONE)
+        self.assertEqual(self.delete_execs()[0]["env"]["FILES"], SHOP_OLD)
+        self.assertEqual(job.summary, "Deleted 1 backup file (976.6 KB).")
+
+    def test_the_newest_backup_of_a_database_is_kept(self):
+        job = self.run_job(self.delete_job(SHOP_OLD, SHOP_NEW))
+        self.assertEqual(job.status, Job.Status.FAILED)
+        self.assertIn(f"{SHOP_NEW} is the newest backup of its database and is kept. Nothing was changed.", job.summary)
+        self.assertEqual(self.delete_execs(), [])  # the script never ran
+        self.assertIn(SHOP_OLD, self.lab.stats)
+        self.assertEqual([s["status"] for s in job.steps], ["failed", "todo", "todo"])
+
+    def test_each_database_keeps_its_own_newest(self):
+        job = self.run_job(self.delete_job(SHOP_OLD, WIKI_OLD))  # the oldest of each: fine
+        self.assertEqual(job.status, Job.Status.DONE, job.summary)
+        self.lab.stats[SHOP_OLD] = (1, 1)
+        refused = self.run_job(self.delete_job(SHOP_MID, WIKI_NEW))  # the newest wiki is kept
+        self.assertEqual(refused.status, Job.Status.FAILED)
+        self.assertIn(f"{WIKI_NEW} is the newest", refused.summary)
+        self.assertIn(SHOP_MID, self.lab.stats)
+
+    def test_a_zip_that_does_not_follow_the_naming_is_never_deleted(self):
+        self.lab.stats["notes_backup.zip"] = (10, 1_700_000_000)
+        job = self.run_job(self.delete_job("notes_backup.zip"))
+        self.assertEqual(job.status, Job.Status.FAILED)
+        self.assertIn("is the newest backup of its database", job.summary)
+
+    def test_a_file_that_is_gone_stops_everything_before_a_single_removal(self):
+        job = self.run_job(self.delete_job(SHOP_OLD, "shop_20200101_000000.zip"))
+        self.assertEqual(job.status, Job.Status.FAILED)
+        self.assertIn("shop_20200101_000000.zip is no longer in /backups", job.summary)
+        self.assertIn("Nothing was changed", job.summary)
+        self.assertEqual(self.delete_execs(), [])
+        self.assertIn(SHOP_OLD, self.lab.stats)
+
+    def test_a_file_that_vanishes_between_the_check_and_the_script_changes_nothing(self):
+        real = self.lab.runner
+
+        def racing(argv, env):
+            if argv[:2] == ["sh", "-c"] and argv[2] == jobs.DELETE_SCRIPT:
+                self.lab.stats.pop(SHOP_MID)  # retention (or a person) removed it a moment ago
+            return real(argv, env)
+
+        self.api.runner = racing
+        job = self.run_job(self.delete_job(SHOP_OLD, SHOP_MID))
+        self.assertEqual(job.status, Job.Status.FAILED)
+        self.assertIn("no longer in /backups, so nothing was deleted", job.summary)
+        self.assertIn(SHOP_OLD, self.lab.stats)  # the script checks every file before removing any
+
+    def test_a_running_backup_blocks_the_delete(self):
+        self.lab.locked = True
+        job = self.run_job(self.delete_job(SHOP_OLD))
+        self.assertEqual(job.status, Job.Status.FAILED)
+        self.assertIn("A backup is running, so nothing was deleted", job.summary)
+        self.assertEqual([s["status"] for s in job.steps], ["done", "failed", "todo"])
+        self.assertIn(SHOP_OLD, self.lab.stats)
+
+    def test_a_script_that_stops_midway_says_some_files_may_be_gone(self):
+        self.lab.delete_exit = 1
+        job = self.run_job(self.delete_job(SHOP_OLD, SHOP_MID))
+        self.assertEqual(job.status, Job.Status.FAILED)
+        self.assertIn("Some files may already be gone", job.summary)
+        self.assertIn("rm: boom", job.log)
+
+    def test_no_files_is_a_failed_job_not_a_crash(self):
+        job = self.run_job(self.delete_job())
+        self.assertEqual(job.status, Job.Status.FAILED)
+        self.assertIn("No backup files were selected", job.summary)
+
+    def test_a_stopped_container_fails_it_like_any_other_job(self):
+        self.server = Server("vps-1", "docker", [make_instance(status="exited")])
+        job = self.run_job(self.delete_job(SHOP_OLD))
+        self.assertIn("is exited", job.summary)
+        self.assertEqual(self.delete_execs(), [])
+
+    def test_a_delete_cut_off_by_a_restart_is_failed_at_the_next_start(self):
+        stuck = self.job(Job.Kind.DELETE, status=Job.Status.RUNNING, files=[SHOP_OLD])
+        self.assertEqual(jobs.recover_orphans(), 1)
+        stuck.refresh_from_db()
+        self.assertEqual(stuck.status, Job.Status.FAILED)
+        self.assertIn("restarted", stuck.summary)
 
 
 class WorkerStartTests(JobTestCase):

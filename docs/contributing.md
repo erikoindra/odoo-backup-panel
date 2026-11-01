@@ -15,14 +15,17 @@ access to every connected server and runs commands against production data.
   The `inspect` response does carry the full environment: filter it to the allowlist right there
   (`docs/contract.md`) and never pass the raw object on.
 - Arguments to the shell always go through environment variables, never through f-strings.
-- A restore must never overwrite or delete an existing database or folder. The panel has no delete
-  command at all; keep it that way.
+- A restore must never overwrite or delete an existing database or folder. The only thing the panel deletes
+  is backup zips, through the delete job and its safeguards (decision D13): never a database, a filestore,
+  a folder, a container or a volume.
 - Do not change the odoo-backup-service repo from here.
 - This repo is public: never put real server, stack, database, user, or domain names in any file,
   including test data and screenshots. Examples use `vps-1`, `acme-staging-backup`, `acme_staging`,
   `admin`.
 - Do not add dependencies beyond `docs/spec.md` section 6 without discussing it first. Dev-only tools
   (Playwright for `scripts/ui_shots.py`) stay out of `requirements.txt` and the image.
+- Contract tests create containers and volumes on the Docker host. Run them only through
+  `scripts/run_contract_tests.sh`, and only on a disposable host (decision D12).
 - Tests first for input validation and parsing (fake Docker client in `panel/tests/fakes.py`);
   anything that touches a real Docker belongs in the contract tests. Before handing a change over:
   `ruff check`, `ruff format --check`, `manage.py test`, `scripts/check_contrast.py`.

@@ -67,7 +67,7 @@ LISTINGS = {
     "acme-staging-backup": BackupListing(zips("acme_staging", [6, 30, 54, 78, 102]), NOW),
     "acme-prod-backup": BackupListing(zips("acme_prod", [60, 84]), NOW),  # stale for a daily schedule
     "demo-shop-backup": BackupListing([], NOW),
-    "wiki-backup": BackupListing(zips("wiki", [2]), NOW),
+    "wiki-backup": BackupListing(zips("wiki", [2, 26, 50]), NOW),
 }
 ENDPOINTS = {
     "vps-1": Endpoint("vps-1", "portainer", "https://p.example.com:443/api/endpoints/4/docker", "k"),
@@ -114,7 +114,7 @@ class Shots(StaticLiveServerTestCase):
             old.unlink()
 
     def setUp(self):
-        self.user = get_user_model().objects.create_user("admin", password=PASSWORD)
+        self.user = get_user_model().objects.create_superuser("admin", password=PASSWORD)
         for target, kwargs in (
             ("find_endpoint", {"side_effect": lambda n: ENDPOINTS.get(n)}),
             ("look_at", {"side_effect": lambda e, **k: SERVERS[e.name]}),
@@ -242,7 +242,10 @@ class Shots(StaticLiveServerTestCase):
                         "console",
                         lambda m, where=where: (
                             errors.append(f"{where} console.{m.type}: {m.text} @ {m.location.get('url', '')}")
-                            if m.type == "error" and "nope.zip" not in m.location.get("url", "")
+                            if m.type == "error"
+                            and not any(
+                                x in m.location.get("url", "") for x in ("nope.zip", "/delete/")
+                            )  # expected 400s
                             else None
                         ),
                     )
@@ -301,7 +304,7 @@ class Shots(StaticLiveServerTestCase):
         self.shot(page, "03c-detail-failed-stale", width, scheme)
         page.click("[data-dismiss]")
         if page.query_selector("#job-panel"):
-            self.problems.append(f"detail @ {width} {scheme}: Tutup did not remove the job panel")
+            self.problems.append(f"detail @ {width} {scheme}: Dismiss did not remove the job panel")
 
         page.goto(base + "/e/vps-1/demo-shop-backup/")
         page.wait_for_selector("#backups .emptystate")
@@ -310,6 +313,40 @@ class Shots(StaticLiveServerTestCase):
         self.shot(page, "03e-detail-stopped", width, scheme)
         page.goto(base + "/e/vps-3/nope/")
         self.shot(page, "03f-detail-unreachable", width, scheme)
+
+        # delete: choose files in the table, confirm on a page of its own, queue the job
+        page.goto(base + "/e/vps-2/wiki-backup/")
+        page.wait_for_selector("#backups input[data-delete-box]")
+        self.shot(page, "03g-detail-delete-controls", width, scheme)
+        where = f"delete @ {width} {scheme}"
+        if not page.is_disabled("[data-delete-submit]"):
+            self.problems.append(f"{where}: the button is enabled with nothing chosen")
+        if page.locator("#backups input[type=checkbox]:disabled").count() != 1:
+            self.problems.append(f"{where}: the newest backup should have exactly one disabled checkbox")
+        page.check("[data-select-all]")
+        if page.inner_text("[data-delete-label]") != "Delete selected (2)":
+            self.problems.append(f"{where}: the count on the button is wrong after select all")
+        page.uncheck("#backups input[data-delete-box] >> nth=0")
+        if page.inner_text("[data-delete-label]") != "Delete selected (1)":
+            self.problems.append(f"{where}: the count did not follow one box being cleared")
+        page.check("#backups input[data-delete-box] >> nth=0")
+        self.shot(page, "03h-detail-delete-selected", width, scheme)
+        page.click("[data-delete-submit]")
+        page.wait_for_selector("#confirm-delete")
+        self.shot(page, "09-delete-confirm", width, scheme)
+        page.fill("#confirm-delete", "delete")
+        page.click("button[type=submit].btn--danger")
+        page.wait_for_selector("#confirm-delete-error:not(:empty)")
+        self.shot(page, "09b-delete-confirm-error", width, scheme)
+        page.fill("#confirm-delete", "DELETE")
+        with page.expect_navigation():
+            page.click("button[type=submit].btn--danger")
+        queued = Job.objects.filter(kind="delete").latest("pk")
+        wiki_names = [b.name for b in LISTINGS["wiki-backup"].backups]
+        if queued.files != wiki_names[1:]:
+            self.problems.append(f"{where}: the queued job has {queued.files}, expected the two older zips")
+        self.shot(page, "09c-detail-delete-queued", width, scheme)
+        queued.delete()  # so the next viewport can queue again (one active job per stack)
 
         # wizard: the stack with a running job only shows the warning; the real walk is on another stack
         page.goto(base + "/e/vps-1/acme-staging-backup/restore/")
@@ -324,13 +361,13 @@ class Shots(StaticLiveServerTestCase):
         page.click("[data-go='2']")
         page.wait_for_selector("#checks [data-all-ok='true']")
         if page.is_disabled("[data-needs-checks]"):
-            self.problems.append(f"wizard @ {width} {scheme}: Lanjut still disabled after checks passed")
+            self.problems.append(f"wizard @ {width} {scheme}: Next still disabled after checks passed")
         self.shot(page, "04-wizard-2", width, scheme)
         # a name that exists -> a failing check must block the next step
         page.fill("#new-db", "acme_prod")
         page.wait_for_selector("#checks [data-all-ok='false']")
         if not page.is_disabled("[data-needs-checks]"):
-            self.problems.append(f"wizard @ {width} {scheme}: Lanjut enabled although a check failed")
+            self.problems.append(f"wizard @ {width} {scheme}: Next enabled although a check failed")
         self.shot(page, "04-wizard-2-fail", width, scheme)
         page.fill("#new-db", "acme_prod_copy2")
         page.check("input[name=neutralize]")
@@ -365,7 +402,7 @@ class Shots(StaticLiveServerTestCase):
         page.goto(base + f"/jobs/{Job.objects.get(instance_slug='wiki-backup').pk}/")
         self.shot(page, "05c-job-done", width, scheme)
         page.goto(base + "/jobs/")
-        self.shot(page, "06-aktivitas", width, scheme)
+        self.shot(page, "06-activity", width, scheme)
         page.goto(base + "/e/vps-1/acme-staging-backup/backups/nope.zip/download")
         self.shot(page, "07-error-page", width, scheme)
         page.keyboard.press("Tab")

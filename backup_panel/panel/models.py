@@ -3,12 +3,13 @@ from django.db import models
 
 
 class Job(models.Model):
-    """One download, backup or restore, kept as the audit trail (docs/spec.md 6)."""
+    """One download, backup, restore or delete, kept as the audit trail (docs/spec.md 6)."""
 
     class Kind(models.TextChoices):
         DOWNLOAD = "download", "Download"
         BACKUP = "backup", "Backup"
         RESTORE = "restore", "Restore"
+        DELETE = "delete", "Delete"
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"
@@ -24,6 +25,7 @@ class Job(models.Model):
     filename = models.CharField(max_length=255, blank=True)  # download / restore
     target_db = models.CharField(max_length=63, blank=True)  # restore
     neutralize = models.BooleanField(default=False)  # restore: run `odoo neutralize` on the new database
+    files = models.JSONField(default=list, blank=True)  # delete: the backup zips to remove
     steps = models.JSONField(default=list, blank=True)  # [{"name", "status", "at"}]
     summary = models.CharField(max_length=500, blank=True)  # the outcome in one sentence, or why it failed
     log = models.TextField(blank=True)
@@ -64,24 +66,27 @@ class Job(models.Model):
     def title(self):
         if self.kind == self.Kind.RESTORE:
             return f"Restore to {self.target_db}"
+        if self.kind == self.Kind.DELETE:
+            return f"Delete {self.files[0]}" if len(self.files) == 1 else f"Delete {len(self.files)} backup files"
         return {"backup": "Back up now", "download": f"Download {self.filename}"}[self.kind]
+
+    # What changes the contents of /backups or the databases: one of these at a time per instance.
+    WORKING_KINDS = (Kind.BACKUP, Kind.RESTORE, Kind.DELETE)
 
     @classmethod
     def active_for(cls, endpoint, slug):
-        """The backup or restore of this instance that is waiting or running, if any."""
+        """The backup, restore or delete of this instance that is waiting or running, if any."""
         return cls.objects.filter(
             endpoint=endpoint,
             instance_slug=slug,
-            kind__in=(cls.Kind.BACKUP, cls.Kind.RESTORE),
+            kind__in=cls.WORKING_KINDS,
             status__in=(cls.Status.QUEUED, cls.Status.RUNNING),
         ).first()
 
     @classmethod
     def latest_for(cls, endpoint, slug):
-        """The newest backup or restore of this instance, whatever its state."""
-        return cls.objects.filter(
-            endpoint=endpoint, instance_slug=slug, kind__in=(cls.Kind.BACKUP, cls.Kind.RESTORE)
-        ).first()
+        """The newest backup, restore or delete of this instance, whatever its state."""
+        return cls.objects.filter(endpoint=endpoint, instance_slug=slug, kind__in=cls.WORKING_KINDS).first()
 
     def __str__(self):
         return f"#{self.pk} {self.kind} {self.endpoint}/{self.instance_slug} ({self.status})"

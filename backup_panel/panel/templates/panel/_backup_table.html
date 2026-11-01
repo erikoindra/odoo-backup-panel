@@ -18,10 +18,12 @@
 {% else %}
 <div class="tablewrap">
   <table>
-    <thead><tr><th>File</th><th class="num">Size</th><th>Created</th><th>Age</th><th><span class="sr-only">Actions</span></th></tr></thead>
+    <thead><tr>{% if user.is_superuser %}<th class="check"><input type="checkbox" data-select-all aria-label="Select all backups that can be deleted"></th>{% endif %}<th>File</th><th class="num">Size</th><th>Created</th><th>Age</th><th><span class="sr-only">Actions</span></th></tr></thead>
     <tbody>
+      {% with protected=listing.protected %}
       {% for backup in listing.backups %}
       <tr>
+        {% if user.is_superuser %}<td class="check">{% if backup.name in protected %}<input type="checkbox" disabled title="The newest backup of its database is kept" aria-label="{{ backup.name }}: the newest backup of its database cannot be deleted">{% else %}<input type="checkbox" name="filename" value="{{ backup.name }}" form="delete-form" data-delete-box aria-label="Select {{ backup.name }}">{% endif %}</td>{% endif %}
         <td><span class="file">{% include "panel/icons/file-archive.svg" %}<span class="mono">{{ backup.name }}</span></span></td>
         <td class="num">{{ backup.size|filesizeformat }}</td>
         <td>{{ backup.mtime|date:"j M Y, H:i" }}</td>
@@ -32,6 +34,7 @@
         </div></td>
       </tr>
       {% endfor %}
+      {% endwith %}
     </tbody>
   </table>
 </div>
@@ -39,10 +42,14 @@
 {% if listing %}
 <div class="panel__foot">
   <span>{{ listing.backups|length }} file{{ listing.backups|length|pluralize }} · {{ listing.total_size|filesizeformat }}{% if instance.retention_days %} · retention {{ instance.retention_days }} days{% endif %} · read at {{ listing.read_at|time:"H:i:s" }}</span>
-  <span class="actions">
+  <div class="actions">
     {% if listing.backups %}<span>An interrupted download starts over; there is no resume.</span>{% endif %}
+    {% if user.is_superuser and listing.backups %}
+    <span>The newest backup of each database is kept.</span>
+    <form id="delete-form" method="get" action="{% url 'delete_backups' endpoint.name slug %}"><button class="btn btn--ghost btn--sm btn--bad" type="submit" data-delete-submit>{% include "panel/icons/trash-2.svg" %}<span data-delete-label>Delete selected</span></button></form>
+    {% endif %}
     <button class="btn btn--ghost btn--sm" type="button" hx-get="{% url 'backups_partial' endpoint.name slug %}?refresh=1" hx-target="#backups" hx-swap="innerHTML">{% include "panel/icons/refresh-cw.svg" %}Reload</button>
-  </span>
+  </div>
 </div>
 {% endif %}
 {% include "panel/_side_status.html" with oob=True %}

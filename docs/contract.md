@@ -52,6 +52,9 @@ the backup container, through exec. Avoiding that receipt entirely would mean re
   or a root container.
 - Retention deletes a database's zips older than `RETENTION_DAYS` × 24 hours,
   only after the next backup succeeds.
+- The panel removes a zip only on request (docs/decisions.md D13): one `rm -f -- /backups/<name>` per chosen
+  file, under the same `flock` on `/backups/.odoo-backup.lock`, after checking that every name is a plain zip
+  name (no path, no leading dot) and that every file exists. It never removes anything else in `/backups`.
 
 ## Filestore
 

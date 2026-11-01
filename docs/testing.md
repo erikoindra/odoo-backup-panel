@@ -4,7 +4,7 @@ Three layers, from the cheapest to the closest to reality. Results below are fro
 
 ## 1. Unit tests (`manage.py test`, no Docker)
 
-267 tests, 19 of them (contract) skipped unless enabled. Docker is replaced by `FakeApi`/`FakeClient`
+332 tests, 24 of them (contract) skipped unless enabled. Docker is replaced by `FakeApi`/`FakeClient`
 (`panel/tests/fakes.py`), so these tests guard the logic, not the shell scripts.
 
 | Area | What is guarded |
@@ -24,8 +24,10 @@ Three layers, from the cheapest to the closest to reality. Results below are fro
 | Restore checks | database and folder free, other jobs, Odoo container (only when neutralizing), one failed check does not hide the others, POST + CSRF |
 | Neutralize | Odoo container found through the volume (one, running, no environment in the result), the job stops before changing anything if there is none, a neutralize failure is reported as "NOT neutralized" without deleting, the script only accepts the name through a variable |
 | Markup | all pages and fragments (including the wizard and the checks fragment); every id/attribute `app.js` looks for exists on the page; (including empty, stopped, error, failed states): balanced tags, unique ids, every `aria-*`/`for`/`href="#..."` points to an existing id, buttons and links have text, every internal URL resolves, every `{% include %}` exists |
+| Delete | the job (only the chosen zips go, names reach the script only as a variable, the newest of each database is kept, a file that is gone, a held lock and a failing `rm` each stop it with a clear message, a delete cut off by a restart is failed), the views (confirmation page, every refusal, the word `DELETE`, one working job per stack, superusers only with a 403 for others, CSRF), the table controls for superusers and for others, the job page |
+| Delete script | the real `DELETE_SCRIPT` in a real shell with `/backups` pointed at a temporary folder: valid names removed, bad names exit 6, a missing file exits 5 and removes nothing, a held lock exits 4 (`test_delete_script.py`, needs `sh` and `flock`) |
 
-**Mutation testing** (code deliberately broken, then restored): 5 in download, 9 in job/view/form/middleware, and during the redesign: the `checks` id in the wizard (markup test fails) and an ignored neutralize failure (job test fails).
+**Mutation testing** (code deliberately broken, then restored): 5 in download, 9 in job/view/form/middleware, and during the redesign: the `checks` id in the wizard (markup test fails) and an ignored neutralize failure (job test fails). For delete: the newest-backup protection in the job and in the view, grouping by database instead of one newest overall, the superuser check, and the confirmation word: every one was caught.
 All were caught, except one check that turned out to be unreachable and was removed.
 One known weakness: the "two workers claim the same job" test cannot simulate a real race;
 it only guards that a job already claimed is not claimed again.
@@ -33,7 +35,14 @@ it only guards that a job already claimed is not claimed again.
 ## 2. Contract tests (`panel/tests/test_contract.py`, real Docker)
 
 Builds its own lab (PostgreSQL, an Odoo data volume with a filestore, the real backup-service container),
-then runs the panel code. Enable with `PANEL_CONTRACT_TESTS=1`. Also runs in CI. The lab builder is in the base class `LabCase`; a second class, `NeutralizeContractTests`, uses **real Odoo** and is active only when `CONTRACT_ODOO_IMAGE` is set (e.g. `odoo:19.0`).
+then runs the panel code. Run it with `scripts/run_contract_tests.sh` (below), which sets
+`PANEL_CONTRACT_TESTS=1`. Also runs in CI, on GitHub's disposable runners.
+
+**Where to run it.** The runner needs the Docker socket, so whoever can run code in it controls the host.
+Run it only on a disposable host (a throwaway VM), never on a server that runs live stacks. The script builds
+the runner image with its dependencies baked in, runs it with `--network none`, names it and removes it when
+the run ends, and refuses to start until `OBP_CONTRACT_ON_DISPOSABLE_HOST=yes` is set. Details: decision D12.
+Example: `OBP_CONTRACT_ON_DISPOSABLE_HOST=yes scripts/run_contract_tests.sh`. The lab builder is in the base class `LabCase`; a second class, `NeutralizeContractTests`, uses **real Odoo** and is active only when `CONTRACT_ODOO_IMAGE` is set (e.g. `odoo:19.0`).
 
 | # | Scenario | Result |
 |---|---|---|
@@ -52,6 +61,11 @@ then runs the panel code. Enable with `PANEL_CONTRACT_TESTS=1`. Also runs in CI.
 | 13 | no temporary directory left in the container | pass |
 | 14 | no new anonymous volumes (catches the D8 leak) | pass |
 | 15 | stopped container: the job fails with a clear sentence, does not hang | pass |
+| 16 | delete: the chosen zips (of two databases) are removed and nothing else (not the lock, not other files, not the database or filestore) | **written, not run yet** |
+| 17 | delete: the newest zip of each database is refused and nothing is removed | **written, not run yet** |
+| 18 | delete: a held backup lock stops it, nothing removed | **written, not run yet** |
+| 19 | delete script alone, in the real BusyBox shell: paths, leading dots, non-zips, patterns, a missing file and a good name next to a bad one remove nothing | **written, not run yet** |
+| 20 | delete: a zip that vanished before the job ran is reported | **written, not run yet** |
 
 **Neutralize with real Odoo** (`NeutralizeContractTests`, `CONTRACT_ODOO_IMAGE=odoo:19.0`; the lab initialises
 the database with `odoo -i base`, then an Odoo container attached to the same data volume):
@@ -71,12 +85,12 @@ Findings from the Odoo tests: Odoo stores lowercase `true`; `odoo shell` through
 ## 2b. Rendering in a headless browser (`scripts/ui_shots.py`, Chromium)
 
 Optional developer tool, needs Playwright in the venv (not a project dependency). The panel runs as a live
-server with Docker faked, then headless Chromium captures 22 page states at 375/768/1024/1440 px,
-light and dark (176 PNGs to `~/odoo-backup-panel-screenshots`, outside the repo), and checks what is only
+server with Docker faked, then headless Chromium captures 27 page states at 375/768/1024/1440 px,
+light and dark (216 PNGs to `~/odoo-backup-panel-screenshots`, outside the repo), and checks what is only
 visible in a browser: no horizontal scroll at any width, no console or server errors,
 `app.js` really runs (status tally filled, timer running, toast appears, "Dismiss" closes the panel),
 wizard: `?file=` selected, "Next" disabled until all checks pass and disabled again when one fails,
-summary correct, wrong confirmation refused, the submission becomes a job with the chosen file and switch.
+summary correct, wrong confirmation refused, the submission becomes a job with the chosen file and switch; delete: the button waits for a choice, "select all" and single boxes update the count, the newest backup's box is disabled, the wrong word is refused, and the confirmed delete becomes a job with exactly the chosen files.
 
 Results 2026-10-29: all passed **after four fixes** that were only visible in a browser:
 
@@ -113,6 +127,7 @@ applied automatically.
 - **Logging in to Odoo over HTTP with a restored database** (`?db=<new>`): the copy is proven to open in
   real Odoo through `odoo shell` (registry loaded, `res.users` readable), but its HTTP login page has not
   been tried.
+- **Delete in the contract tests (16-20)** against real Docker. They are written, but contract tests may only run on a disposable host (D12) and none was available. The script itself is proven in `dash` and `bash` (`test_delete_script.py`); BusyBox, the shell of the backup container, is exactly what scenario 19 checks.
 - **Zips of hundreds of MB** through Cloudflare (largest tested 17.7 MB), and `JOB_TIMEOUT` on a long restore.
 - **Non-admin Portainer token** (S5): all tests used an admin token.
 - **The panel behind real nginx and Cloudflare**: headers and flows were simulated with an HTTP client;

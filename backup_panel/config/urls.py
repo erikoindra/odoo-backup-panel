@@ -17,6 +17,7 @@ urlpatterns = [
     path("e/<str:endpoint>/<str:slug>/backup", views.backup_now, name="backup_now"),
     path("e/<str:endpoint>/<str:slug>/restore/", views.restore, name="restore"),
     path("e/<str:endpoint>/<str:slug>/restore/check/", views.restore_check, name="restore_check"),
+    path("e/<str:endpoint>/<str:slug>/delete/", views.delete_backups, name="delete_backups"),
     path("jobs/", views.job_list, name="job_list"),
     path("jobs/<int:pk>/", views.job_status, name="job_status"),
 ]

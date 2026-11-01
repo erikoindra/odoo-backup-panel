@@ -106,6 +106,34 @@
     if (download) { showToast('Download started', download.getAttribute('data-download')); }
   });
 
+  // ---- Backups table: choose the files to delete ---------------------------------------------------
+  // Without script the form still works (the server asks for at least one file); with it the button waits
+  // for a choice and shows how many files are chosen.
+  function syncDelete() {
+    var submit = document.querySelector('[data-delete-submit]');
+    if (!submit) { return; }
+    var boxes = document.querySelectorAll('input[data-delete-box]');
+    var all = document.querySelector('[data-select-all]');
+    var checked = 0;
+    boxes.forEach(function (box) { if (box.checked) { checked++; } });
+    submit.disabled = checked === 0;
+    submit.querySelector('[data-delete-label]').textContent =
+      checked ? 'Delete selected (' + checked + ')' : 'Delete selected';
+    if (all) {
+      all.checked = checked > 0 && checked === boxes.length;
+      all.indeterminate = checked > 0 && checked < boxes.length;
+    }
+  }
+  document.addEventListener('change', function (event) {
+    var all = event.target.closest && event.target.closest('[data-select-all]');
+    if (all) {
+      document.querySelectorAll('input[data-delete-box]').forEach(function (box) { box.checked = all.checked; });
+    }
+    if (all || (event.target.closest && event.target.closest('input[data-delete-box]'))) { syncDelete(); }
+  });
+  document.body.addEventListener('htmx:afterSettle', syncDelete);
+  syncDelete();
+
   // ---- Restore wizard: progressive enhancement over a form that works without script ------------
   var wizard = document.getElementById('wizard');
   if (!wizard) { return; }

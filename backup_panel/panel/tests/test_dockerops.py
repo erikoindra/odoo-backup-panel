@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import docker
@@ -641,3 +641,49 @@ class FindOdooContainerTests(SimpleTestCase):
         object.__setattr__(instance, "odoo_data_volume", "")
         with self.assertRaises(dockerops.OdooNotFound):
             self.find(odoo_inspect(), instance=instance)
+
+
+def zip_at(name, hours_ago):
+    return dockerops.Backup(name, 1, datetime(2026, 10, 29, 12, 0, tzinfo=UTC) - timedelta(hours=hours_ago))
+
+
+class ProtectedBackupTests(SimpleTestCase):
+    """The newest zip of each database cannot be deleted from the panel."""
+
+    def listing(self, *backups):
+        newest_first = sorted(backups, key=lambda b: b.mtime, reverse=True)
+        return dockerops.BackupListing(newest_first, datetime(2026, 10, 29, 12, 0, tzinfo=UTC))
+
+    def test_a_zip_belongs_to_the_database_before_its_timestamp(self):
+        self.assertEqual(zip_at("shop_20261029_020000.zip", 0).group, "shop")
+        self.assertEqual(zip_at("odoo_shop_20261029_020000.zip", 0).group, "odoo_shop")
+        self.assertEqual(zip_at("prefix-shop_prod_20261029_020000.zip", 0).group, "prefix-shop_prod")
+        self.assertEqual(zip_at("notes.zip", 0).group, "notes.zip")  # not made by odoo-backup: a group of its own
+        self.assertEqual(zip_at("shop_20261029.zip", 0).group, "shop_20261029.zip")
+
+    def test_the_newest_of_one_database_is_protected(self):
+        listing = self.listing(
+            zip_at("shop_20261029_020000.zip", 10),
+            zip_at("shop_20261028_020000.zip", 34),
+            zip_at("shop_20261027_020000.zip", 58),
+        )
+        self.assertEqual(listing.protected, {"shop_20261029_020000.zip"})
+
+    def test_every_database_keeps_its_own_newest(self):
+        listing = self.listing(
+            zip_at("shop_20261029_020000.zip", 10),
+            zip_at("shop_20261028_020000.zip", 34),
+            zip_at("wiki_20261028_030000.zip", 33),
+            zip_at("wiki_20261027_030000.zip", 57),
+            zip_at("shop_test_20261020_020000.zip", 200),  # another database whose name starts like shop
+        )
+        self.assertEqual(
+            listing.protected, {"shop_20261029_020000.zip", "wiki_20261028_030000.zip", "shop_test_20261020_020000.zip"}
+        )
+
+    def test_a_zip_without_the_naming_is_always_protected(self):
+        listing = self.listing(zip_at("shop_20261029_020000.zip", 1), zip_at("manual.zip", 500))
+        self.assertEqual(listing.protected, {"shop_20261029_020000.zip", "manual.zip"})
+
+    def test_nothing_is_protected_in_an_empty_listing(self):
+        self.assertEqual(self.listing().protected, frozenset())

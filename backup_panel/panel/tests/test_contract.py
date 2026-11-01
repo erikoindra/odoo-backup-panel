@@ -6,7 +6,8 @@ through every way restore can be refused or fail. This is what proves that the s
 panel/jobs.py really behave the way the unit tests' stand-in assumes. The tests are numbered because
 they build on each other, and unittest runs them in name order.
 
-Off by default. Switch on with PANEL_CONTRACT_TESTS=1. Settings:
+Off by default. Run it with scripts/run_contract_tests.sh, on a disposable host only: the test runner needs
+the Docker socket, so whoever can run code in it controls the host (see decisions.md D12). Settings:
   CONTRACT_ADMIN_URL   Docker used to build the lab           (default unix:///var/run/docker.sock)
   CONTRACT_PANEL_URL   Docker the panel talks to              (default: same as the admin URL)
                        point it at a docker-socket-proxy to check the permissions the panel needs
@@ -364,6 +365,92 @@ class ContractTests(LabCase):
         finally:
             self.backup.start()
             wait_until(lambda: self.backup.reload() or self.backup.status == "running", 30, "did not restart")
+
+    # --- deleting backup files (decisions.md D13) ---
+
+    def make_old_zips(self, *names_and_dates):
+        """Zips with a fixed age in /backups. Only their names and ages matter to the panel."""
+        for name, date in names_and_dates:
+            self.volume_shell(f"echo old > /b/{name} && touch -d '{date} 00:00:00' /b/{name}")
+
+    def backups_dir(self):
+        return set(self.volume_shell("ls -A /b").split())
+
+    def test_16_the_chosen_zips_are_deleted_and_nothing_else_is(self):
+        self.make_old_zips(
+            ("shop_20200101_000000.zip", "2020-01-01"),
+            ("shop_20200102_000000.zip", "2020-01-02"),
+            ("shop_20200103_000000.zip", "2020-01-03"),
+            ("other_20200101_000000.zip", "2020-01-01"),
+            ("other_20200102_000000.zip", "2020-01-02"),
+        )
+        before = self.backups_dir()
+        gone = ["shop_20200101_000000.zip", "shop_20200102_000000.zip", "other_20200101_000000.zip"]
+        job = self.run_job(Job.Kind.DELETE, files=gone)
+        self.assertEqual(job.status, Job.Status.DONE, job.summary + "\n" + job.log)
+        self.assertRegex(job.summary, r"^Deleted 3 backup files \(")
+        self.assertEqual([s["status"] for s in job.steps], ["done"] * 3)
+        for name in gone:
+            self.assertIn(f"deleted {name}", job.log)
+        self.assertEqual(self.backups_dir(), before - set(gone))  # nothing else: not the lock, not other files
+        self.assertEqual(self.rows("shop"), 2)  # databases and filestores are not touched
+        self.assertEqual(self.volume_shell("cat /d/filestore/shop/ab/abc123"), "one")
+
+    def test_17_the_newest_zip_of_each_database_is_refused_and_nothing_is_removed(self):
+        before = self.backups_dir()
+        # shop_20200103 is only an old zip of its database, but other_20200102 is the newest of its own
+        job = self.run_job(Job.Kind.DELETE, files=["shop_20200103_000000.zip", "other_20200102_000000.zip"])
+        self.assertEqual(job.status, Job.Status.FAILED)
+        self.assertIn("other_20200102_000000.zip is the newest backup of its database and is kept", job.summary)
+        self.assertIn("Nothing was changed", job.summary)
+        newest = self.run_job(Job.Kind.DELETE, files=[self.newest_zip()])
+        self.assertEqual(newest.status, Job.Status.FAILED)
+        self.assertIn("is the newest backup of its database", newest.summary)
+        self.assertEqual(self.backups_dir(), before)
+
+    def test_18_a_held_lock_blocks_the_delete(self):
+        holder = self.api().exec_create(
+            self.backup.id, ["sh", "-c", "exec 9>/backups/.odoo-backup.lock; flock -n 9; sleep 12"]
+        )["Id"]
+        self.api().exec_start(holder, detach=True)
+        time.sleep(1.5)
+        before = self.backups_dir()
+        job = self.run_job(Job.Kind.DELETE, files=["shop_20200103_000000.zip"])
+        self.assertEqual(job.status, Job.Status.FAILED)
+        self.assertIn("A backup is running, so nothing was deleted", job.summary)
+        self.assertEqual(self.backups_dir(), before)
+        wait_until(lambda: not self.api().exec_inspect(holder)["Running"], 30, "lock holder did not finish")
+
+    def test_19_the_script_checks_every_name_itself_and_removes_nothing_when_one_is_bad(self):
+        # The panel only passes names it has already checked. The script does not rely on that.
+        before = self.backups_dir()
+        for files, code in (
+            ("../etc/hostname", 6),  # a path
+            (".hidden.zip", 6),  # a leading dot
+            ("notes.txt", 6),  # not a zip
+            ("shop_*.zip", 6),  # a pattern
+            ("shop_20200103_000000.zip missing_20200101_000000.zip", 5),  # one file is not there
+            ("shop_20200103_000000.zip ../etc/hostname", 6),  # a good name next to a bad one
+        ):
+            with self.subTest(files):
+                exit_code, _out, _err = dockerops.run_detached(
+                    self.api(),
+                    self.instance().container_id,
+                    ["sh", "-c", jobs.DELETE_SCRIPT],
+                    environment={"FILES": files},
+                )
+                self.assertEqual(exit_code, code)
+                self.assertEqual(self.backups_dir(), before)
+        exit_code, _out, _err = dockerops.run_detached(
+            self.api(), self.instance().container_id, ["test", "-f", "/etc/hostname"]
+        )
+        self.assertEqual(exit_code, 0)
+
+    def test_20_a_zip_that_vanished_between_the_list_and_the_job_is_reported(self):
+        job = self.run_job(Job.Kind.DELETE, files=["shop_20190101_000000.zip"])
+        self.assertEqual(job.status, Job.Status.FAILED)
+        self.assertIn("shop_20190101_000000.zip is no longer in /backups", job.summary)
+        self.assertIn("Nothing was changed", job.summary)
 
 
 @unittest.skipUnless(ODOO_IMAGE, "set CONTRACT_ODOO_IMAGE (for example odoo:19.0) to test neutralize on real Odoo")

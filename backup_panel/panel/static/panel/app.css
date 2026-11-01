@@ -281,3 +281,13 @@ a.name:hover { text-decoration: underline; }
 .js-only { display: none; }
 .wizard[data-js] .js-only { display: block; }
 .panel__body.panel__note { padding-bottom: 0; }
+
+/* --- deleting backups --- */
+th.check, td.check { width: 44px; padding-right: 0; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; vertical-align: middle; }
+.check input:disabled { cursor: not-allowed; opacity: .45; }
+.btn--bad { color: var(--bad); }
+ul.plain { margin: var(--s1) 0 0 var(--s4); padding: 0; list-style: disc; }
+ul.plain li { margin-top: 2px; }
+.panel__foot form { margin: 0; }
+@media (pointer: coarse) { .check input { width: 24px; height: 24px; } }

@@ -179,6 +179,9 @@ def suggest_db_name(filename):
     return re.sub(r"[^a-z0-9_]", "_", base.lower())[: 63 - len(suffix)] + suffix
 
 
+BACKUP_STAMP = re.compile(r"(.+)_\d{8}_\d{6}\.zip")  # <prefix><db>_<YYYYMMDD>_<HHMMSS>.zip, as odoo-backup names it
+
+
 @dataclass(frozen=True, slots=True)
 class Backup:
     name: str
@@ -188,6 +191,13 @@ class Backup:
     @property
     def suggested_db(self):
         return suggest_db_name(self.name)
+
+    @property
+    def group(self):
+        """Everything before the timestamp: which database this zip belongs to. A zip that does not follow the
+        naming is a group of its own."""
+        match = BACKUP_STAMP.fullmatch(self.name)
+        return match.group(1) if match else self.name
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +212,15 @@ class BackupListing:
     @property
     def total_size(self):
         return sum(b.size for b in self.backups)
+
+    @property
+    def protected(self):
+        """Names that cannot be deleted from the panel: the newest zip of each database, so the last backup is
+        never lost to one wrong click. `backups` is newest first."""
+        newest = {}
+        for backup in self.backups:
+            newest.setdefault(backup.group, backup.name)
+        return frozenset(newest.values())
 
 
 # --- small TTL cache -----------------------------------------------------------------------

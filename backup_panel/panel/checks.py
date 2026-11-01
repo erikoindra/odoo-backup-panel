@@ -68,7 +68,7 @@ def run_checks(endpoint, instance, db, neutralize):
             try:
                 checks.append(future.result())
             except dockerops.DOCKER_ERRORS as e:
-                checks.append(Check(False, "Pemeriksaan", dockerops.describe(e)))
+                checks.append(Check(False, "Check", dockerops.describe(e)))
     active = Job.active_for(endpoint.name, instance.slug)
     checks.append(
         Check(True, "No other job is running for this instance")

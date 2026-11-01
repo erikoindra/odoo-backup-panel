@@ -15,7 +15,7 @@
   {% if user.is_authenticated %}
   {% with page=request.resolver_match.url_name %}
   <nav class="nav" aria-label="Main">
-    <a href="{% url 'instance_list' %}"{% if page == 'instance_list' or page == 'instance_detail' or page == 'restore' %} aria-current="page"{% endif %}>Instances</a>
+    <a href="{% url 'instance_list' %}"{% if page == 'instance_list' or page == 'instance_detail' or page == 'restore' or page == 'delete_backups' %} aria-current="page"{% endif %}>Instances</a>
     <a href="{% url 'job_list' %}"{% if page == 'job_list' or page == 'job_status' %} aria-current="page"{% endif %}>Activity</a>
   </nav>
   {% endwith %}

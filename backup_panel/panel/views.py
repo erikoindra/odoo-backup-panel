@@ -1,4 +1,5 @@
 from datetime import timedelta
+from functools import wraps
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
@@ -8,9 +9,24 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from panel import checks, dockerops, health
-from panel.forms import DB_NAME, RESERVED, RestoreForm
+from panel import checks, dockerops, health, jobs
+from panel.forms import DB_NAME, RESERVED, DeleteForm, RestoreForm
 from panel.models import Job
+
+
+def superuser_required(view):
+    """Login first (anonymous users go to the sign-in page), then superusers only: anyone else gets a 403 page."""
+
+    @login_required
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        if not request.user.is_superuser:
+            return error_page(
+                request, 403, "Not allowed", "Only superusers can delete backup files.", reverse("instance_list")
+            )
+        return view(request, *args, **kwargs)
+
+    return wrapper
 
 
 @login_required
@@ -336,15 +352,73 @@ def restore_check(request, endpoint, slug):
         try:
             items = checks.run_checks(endpoint, instance, db, neutralize)
         except dockerops.DOCKER_ERRORS as e:
-            items = [checks.Check(False, "Pemeriksaan", dockerops.describe(e))]
+            items = [checks.Check(False, "Check", dockerops.describe(e))]
     return render(request, "panel/_restore_checks.html", {"checks": items, "all_ok": all(c.ok for c in items)})
+
+
+# --- delete backup files ---------------------------------------------------------------------
+
+
+def chosen_for_delete(names, listing):
+    """(backups, problems) for the file names asked for. Every name must be in the listing just read, and the
+    newest backup of each database is refused. The backups come back in listing order (newest first)."""
+    asked = list(dict.fromkeys(n.strip() for n in names if n.strip()))
+    present = {b.name: b for b in listing.backups}
+    problems = []
+    if not asked:
+        problems.append("Select at least one backup file.")
+    if len(asked) > jobs.MAX_DELETE_FILES:
+        problems.append(f"Select at most {jobs.MAX_DELETE_FILES} files at a time.")
+    for name in asked[: jobs.MAX_DELETE_FILES + 1]:
+        if not dockerops.ZIP_NAME.fullmatch(name) or name not in present:
+            problems.append(f"{name[:120]} is not in the backup list.")
+        elif name in listing.protected:
+            problems.append(f"{name} is the newest backup of its database and cannot be deleted.")
+    wanted = set(asked)
+    return [b for b in listing.backups if b.name in wanted], problems
+
+
+@superuser_required
+@require_http_methods(["GET", "POST"])
+def delete_backups(request, endpoint, slug):
+    """Delete backup zips: GET shows what would go and asks for confirmation, POST queues the delete job.
+    The files come as repeated `filename` values, so the table's checkboxes can feed a plain GET form."""
+    endpoint, instance, problem = usable_instance(request, endpoint, slug)
+    if problem:
+        return problem
+    detail_url = reverse("instance_detail", args=[endpoint.name, slug])
+    try:
+        listing = dockerops.list_backups_cached(endpoint, instance, use_cache=False)
+    except dockerops.DOCKER_ERRORS as e:
+        return error_page(request, 502, "Delete could not start", dockerops.describe(e), detail_url)
+
+    data = request.POST if request.method == "POST" else request.GET
+    backups, problems = chosen_for_delete(data.getlist("filename"), listing)
+    form = DeleteForm(request.POST) if request.method == "POST" else DeleteForm()
+    if request.method == "POST" and not problems and form.is_valid():
+        job = enqueue(request, endpoint, instance, Job.Kind.DELETE, files=[b.name for b in backups])
+        if job is None:
+            return busy_page(request, endpoint, slug)
+        return redirect("instance_detail", endpoint.name, slug)  # its job panel follows the job
+    context = {
+        "endpoint": endpoint,
+        "instance": instance,
+        "slug": slug,
+        "backups": backups,
+        "problems": problems,
+        "total_size": sum(b.size for b in backups),
+        "form": form,
+        "active_job": Job.active_for(endpoint.name, slug),
+    }
+    bad = problems or (request.method == "POST" and not form.is_valid())
+    return render(request, "panel/delete.html", context, status=400 if bad else 200)
 
 
 def job_response(request, job, full_template, partial_template):
     """A job's page for a browser, or just its fragment for HTMX. When a backup or restore has ended, the
     remembered /backups listing is dropped and the page is told to reload its table."""
     template = partial_template if request.headers.get("HX-Request") else full_template
-    standalone = not request.headers.get("HX-Request") or request.GET.get("page") == "1"  # on its own page: no Tutup
+    standalone = not request.headers.get("HX-Request") or request.GET.get("page") == "1"  # on its own page: no Dismiss
     response = render(request, template, {"job": job, "standalone": standalone})
     if request.headers.get("HX-Request") and not job.is_active and job.kind != Job.Kind.DOWNLOAD:
         dockerops.forget_listing(job.endpoint, job.instance_slug)

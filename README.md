@@ -17,12 +17,15 @@ audit trail. Test results: [`docs/testing.md`](docs/testing.md). Plan and decisi
 | Page | Contents |
 |---|---|
 | Instances | every backup stack, grouped by server, with its last backup; search |
-| Stack detail | schedule, retention, zip list, **Download**, **Back up now**, **Restore** |
+| Stack detail | schedule, retention, zip list, **Download**, **Back up now**, **Restore**, **Delete** (superusers) |
 | Job | steps, log, and result; refreshes automatically until it finishes |
 | Activity | every download, backup, and restore: who, when, the result |
 
 A restore always goes into a **new** database, never overwrites, and never deletes anything (even when
 it fails halfway: the job message states exactly what already exists).
+
+Deleting a backup is permanent and only for superusers: files are chosen in the table, confirmed by typing `DELETE`,
+and the newest backup of each database is always kept (decision D13).
 
 ## Running locally
 
@@ -144,6 +147,7 @@ odoo-backup-panel/
 ├── backup_panel/            Django application (config/, panel/, tests)
 ├── Dockerfile, docker-compose.yml, .env.example, docker/, deploy/   deploy package
 ├── scripts/check_contrast.py  checks color token contrast (WCAG 4.5:1)
+├── scripts/run_contract_tests.sh  contract tests in an isolated runner (disposable host only)
 └── scripts/ui_shots.py      screenshots every page in headless Chromium (optional, needs Playwright)
 ```
 
@@ -198,8 +202,8 @@ IP allowlist (`deploy/nginx.conf.example`), restrict the panel port with the clo
 ufw), and use a dedicated Portainer user. Details and reasons: [`docs/spec.md`](docs/spec.md) sections 7 and 9.
 The image is published to GHCR when a `v*` tag is pushed (`.github/workflows/image.yml`).
 
-Contract tests against real Docker: `PANEL_CONTRACT_TESTS=1 python manage.py test panel.tests.test_contract`
-(add `CONTRACT_ODOO_IMAGE=odoo:19.0` to test neutralize with a real Odoo).
+Contract tests against real Docker, on a disposable host only: `OBP_CONTRACT_ON_DISPOSABLE_HOST=yes scripts/run_contract_tests.sh`
+(add `CONTRACT_ODOO_IMAGE=odoo:19.0` to test neutralize with a real Odoo). See `docs/testing.md` section 2.
 
 ## Vendored third-party files
 

@@ -14,3 +14,5 @@ staticfiles/
 .ruff_cache/
 # agent-local notes
 CLAUDE.local.md
+# local git worktrees and agent state
+.claude/

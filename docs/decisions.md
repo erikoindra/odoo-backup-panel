@@ -104,7 +104,7 @@ Format: short context, decision, reason, consequences. New decisions are added a
 - **Decision**: `run_helper` always mounts a `tmpfs` at `/backups`. One line, no extra API calls.
   Guarded by a unit test and a contract test that count new anonymous volumes.
 - **Consequences**: anonymous volumes that already piled up on the server from spikes and tests before
-  the fix must be cleaned up manually; the panel has no delete command of any kind.
+  the fix must be cleaned up manually; the panel does not remove volumes (its only delete is a backup zip, D13).
 
 ## D9. Restore holds the backup lock; no automatic deletion
 
@@ -116,6 +116,8 @@ Format: short context, decision, reason, consequences. New decisions are added a
   backup fail; leftovers of a failed restore are cleaned up manually (the job message says exactly what
   exists). The guard hook in the development environment also blocks database-deleting commands, which
   is in line with this decision.
+- **Amended by D13**: the panel may delete a backup zip on request. It still never deletes a database or
+  a folder.
 
 ## D10. Redesign: warm palette + teal accent, IBM Plex Sans and JetBrains Mono
 
@@ -153,3 +155,56 @@ Format: short context, decision, reason, consequences. New decisions are added a
     neutralized (nothing is deleted, in line with D9);
   - a data volume that is a bind mount (not a named volume) is not supported for neutralize;
   - without the switch, the job summary reminds you to run `odoo neutralize` yourself.
+
+## D12. Contract test runner: disposable host only, no network
+
+- **Context**: the contract tests create containers, volumes and networks on the Docker host they run on, and
+  their runner container needs the Docker socket to do that. On 2026-10-29 the runs were started by hand on a
+  server that also runs live stacks: `docker run --rm python:3.12-slim` with the socket mounted and network access
+  for `pip install`. A security scanner on that server reported two such runner containers while they were
+  running. The lab itself was separate from the live stacks, and the runners were gone by the time of the report.
+- **Decision**: contract tests run only through `scripts/run_contract_tests.sh`, and only on a host the owner
+  is prepared to throw away. The runner image is built once with the dependencies in it. The runner gets
+  `--network none` (or only an internal network to the proxy), the app is mounted read-only, the container is
+  named and removed on exit, and the script refuses to start until `OBP_CONTRACT_ON_DISPOSABLE_HOST=yes` is set.
+- **Reason**: whoever can run code in the runner controls the host. The socket cannot be made safer for this
+  test, because the test's job is to create containers. Removing the network and the install step takes away
+  the outbound path during the run, and a disposable host limits what is at stake.
+- **Consequences**:
+  - a socket proxy does not solve it: it cannot restrict what a created container may mount, so `--proxy`
+    checks the panel's permissions but does not isolate the run;
+  - the GitHub Actions `contract` job is accepted: it runs on a GitHub-hosted VM that is destroyed afterwards;
+  - without a disposable VM the contract tests are not run locally; CI still runs them.
+
+## D13. Delete backup files from the panel (amends D9)
+
+- **Context**: backups pile up when retention is long or backups are frequent, and the only ways to remove
+  one were `RETENTION_DAYS` or a console in the container. D9 said the panel has no delete command of any
+  kind. The owner decided that chosen backup zips can be deleted from the panel, like the other actions.
+- **Decision**: a delete job removes the chosen zips from `/backups` and nothing else: never a database, a
+  filestore folder or any other file (D9 still holds for those). It is permanent. There is no trash folder:
+  the service's retention only looks at the top level of `/backups`, so it would never empty a trash
+  folder and the files would pile up again. Safeguards:
+  - **superusers only**: anyone else gets a 403 and sees no controls;
+  - **several files at once** (up to 50), shown again on a confirmation page where the word `DELETE` must
+    be typed;
+  - **the newest zip of each database is never deleted**: a zip belongs to the database named by the part
+    before `_YYYYMMDD_HHMMSS.zip`; a zip that does not follow that naming is a group of its own, so it can
+    never be deleted from the panel;
+  - **same lock and queue as backups and restores**: one backup, restore or delete per stack at a time, and
+    `flock` on `/backups/.odoo-backup.lock` inside the backup container, so it cannot run while a backup or
+    its retention does;
+  - **checked three times**: when the confirmation page is shown, again when the job runs (`/backups` is read
+    again), and once more in the shell script, which accepts only plain zip names and removes nothing if a
+    single file is missing or refused;
+  - **recorded** in Activity like every other job, with who and when.
+- **Reason**: deleting is the one action that cannot be undone, so every way of getting it wrong is closed
+  off: a wrong click (typed word, listed files, newest kept), a race (lock, re-check), a bad name (script),
+  and the wrong person (superusers).
+- **Consequences**:
+  - the job queue has three working kinds (backup, restore, delete), one at a time per stack;
+  - if `rm` fails midway, some files may already be gone: the job log has one `deleted <name>` line per file and
+    the message says so;
+  - `odoo-backup-service` is unchanged and its retention keeps working; a `odoo-backup delete` subcommand
+    could replace the script later, at the price of a new image version for every `pgNN` tag;
+  - deleting by rule (older than N days, keep N files) stays with `RETENTION_DAYS`, not the panel.

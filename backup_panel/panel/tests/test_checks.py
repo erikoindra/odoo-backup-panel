@@ -120,5 +120,5 @@ class CheckTests(TestCase):
         with patch.object(checks, "folder_is_free", side_effect=TimeoutError("slow")):
             results = checks.run_checks(ENDPOINT, self.instance, "acme_copy", neutralize=False)
         self.assertTrue(results[0].ok)
-        self.assertEqual((results[1].ok, results[1].label), (False, "Pemeriksaan"))
+        self.assertEqual((results[1].ok, results[1].label), (False, "Check"))
         self.assertIn("slow", results[1].problem)

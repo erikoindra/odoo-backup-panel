@@ -1,4 +1,4 @@
-"""Backup and restore jobs, run by the worker (`manage.py run_jobs`). See docs/spec.md sections 5.2, 5.3.
+"""Backup, restore and delete jobs, run by the worker (`manage.py run_jobs`). See docs/spec.md sections 5.2-5.4.
 
 All Docker access goes through panel.dockerops. Values for a command (database name, file name) reach
 the shell only as environment variables, never inside the script text.
@@ -8,6 +8,7 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
+from django.template.defaultfilters import filesizeformat
 from django.utils import timezone
 
 from panel import dockerops
@@ -18,8 +19,9 @@ log = logging.getLogger(__name__)
 LOG_LIMIT = 200_000  # characters of command output kept in Job.log
 RUNNING_BACKUP = "another backup is already running"  # what odoo-backup says when it holds the lock
 
-# exit codes the restore scripts use for the situations that have their own message
-EXISTS, LOCKED, GONE = 3, 4, 5
+# exit codes the restore and delete scripts use for the situations that have their own message
+EXISTS, LOCKED, GONE, INVALID = 3, 4, 5, 6
+MAX_DELETE_FILES = 50  # backup zips one delete job may remove
 
 # Runs in the backup container (it has psql, createdb, unzip and the PG* environment). It holds the same
 # lock as odoo-backup, so a scheduled backup or its retention cannot run in the middle of a restore.
@@ -66,6 +68,29 @@ set -- odoo neutralize -d "$NEW_DB"
 [ -z "${USER:-}" ] || set -- "$@" --db_user "$USER"
 [ -z "${PASSWORD:-}" ] || set -- "$@" --db_password "$PASSWORD"
 exec "$@"
+"""
+
+
+# Runs in the backup container, under the same lock as odoo-backup and its retention. Every name is checked
+# again here (a zip name, no path, no leading dot) and every file must exist before the first one is removed,
+# so a bad request removes nothing. FILES holds the names separated by spaces; globbing is off.
+DELETE_SCRIPT = """\
+set -eu
+set -f
+exec 9>/backups/.odoo-backup.lock
+flock -n 9 || exit 4
+for f in $FILES; do
+  case "$f" in
+    .*|*[!A-Za-z0-9._-]*) echo "invalid name: $f" >&2; exit 6 ;;
+    *.zip) ;;
+    *) echo "invalid name: $f" >&2; exit 6 ;;
+  esac
+  [ -f "/backups/$f" ] || { echo "missing: $f" >&2; exit 5; }
+done
+for f in $FILES; do
+  rm -f -- "/backups/$f"
+  echo "deleted $f"
+done
 """
 
 
@@ -258,9 +283,59 @@ def run_restore(job, endpoint, instance):
     )
 
 
+# --- delete backup files --------------------------------------------------------------------
+
+
+def run_delete(job, endpoint, instance):
+    """Remove the chosen zips from /backups. Nothing else is ever removed: no database, no folder."""
+    names = list(dict.fromkeys(job.files))
+    plan(job, ["Check backup files", "Delete files", "Done"])
+    if not names:
+        raise JobFailed("No backup files were selected. Nothing was changed.")
+    api = dockerops.docker_client(endpoint).api
+
+    mark(job, 0, "running")
+    # Read again, now: the list the admin saw may be old (retention or a new backup can have changed it).
+    listing = dockerops.BackupListing(dockerops.list_backups(api, instance), now())
+    present = {b.name: b for b in listing.backups}
+    for name in names:
+        if name not in present:
+            mark(job, 0, "failed")
+            raise JobFailed(f"{name} is no longer in /backups (retention may have removed it). Nothing was changed.")
+        if name in listing.protected:
+            mark(job, 0, "failed")
+            raise JobFailed(f"{name} is the newest backup of its database and is kept. Nothing was changed.")
+    note(job, "to delete: " + ", ".join(f"{n} ({filesizeformat(present[n].size)})" for n in names))
+    mark(job, 0, "done")
+
+    mark(job, 1, "running")
+    code, out, err = dockerops.run_detached(
+        api,
+        instance.container_id,
+        ["sh", "-c", DELETE_SCRIPT],
+        environment={"FILES": " ".join(names)},
+        timeout=settings.JOB_TIMEOUT,
+        poll_interval=settings.JOB_POLL_INTERVAL,
+    )
+    note(job, output(code, out, err) or "(no output)")
+    if code != 0:
+        mark(job, 1, "failed")
+        if code == LOCKED:
+            raise JobFailed("A backup is running, so nothing was deleted. Try again in a few minutes.")
+        if code == GONE:
+            raise JobFailed("A file is no longer in /backups, so nothing was deleted. See the log below.")
+        if code == INVALID:
+            raise JobFailed("A file name was refused, so nothing was deleted. See the log below.")
+        raise JobFailed(f"Deleting stopped (code {code}). Some files may already be gone: see the log below.")
+    mark(job, 1, "done")
+    mark(job, 2, "done")
+    freed = filesizeformat(sum(present[n].size for n in names)).replace("\xa0", " ")
+    job.summary = f"Deleted {len(names)} backup file{'' if len(names) == 1 else 's'} ({freed})."
+
+
 # --- running ----------------------------------------------------------------------------------
 
-RUNNERS = {Job.Kind.BACKUP: run_backup, Job.Kind.RESTORE: run_restore}
+RUNNERS = {Job.Kind.BACKUP: run_backup, Job.Kind.RESTORE: run_restore, Job.Kind.DELETE: run_delete}
 
 
 def execute(job):
@@ -297,10 +372,10 @@ def run_next():
 
 
 def recover_orphans():
-    """At worker start: a backup or restore still marked running was cut off by a restart. A download
+    """At worker start: a backup, restore or delete still marked running was cut off by a restart. A download
     marked running belongs to the web process, so only very old ones (long gone) are closed."""
     reason = "Stopped: the worker or the panel restarted while the job was running."
-    cut_off = Job.objects.filter(status=Job.Status.RUNNING, kind__in=(Job.Kind.BACKUP, Job.Kind.RESTORE)).update(
+    cut_off = Job.objects.filter(status=Job.Status.RUNNING, kind__in=Job.WORKING_KINDS).update(
         status=Job.Status.FAILED, summary=reason, finished_at=now()
     )
     stale = Job.objects.filter(
