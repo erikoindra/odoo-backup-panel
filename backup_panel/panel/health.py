@@ -149,7 +149,13 @@ def assess(instance, listing, error="", now=None):
         return Health("unreadable", "Unreadable", error)
     if listing is None:
         return Health("loading", "Loading")
-    latest = listing.latest
+    latest = listing.latest_full
+    if latest is None and listing.backups:
+        return Health(
+            "empty",
+            "No full backup yet",
+            "Only database-only backups exist. The first full backup runs on schedule, or start one now.",
+        )
     if latest is None:
         return Health("empty", "No backups yet", "The first backup runs on schedule, or start one now.")
     interval = expected_interval(instance.config.get("CRON_SCHEDULE", ""))

@@ -179,7 +179,7 @@ class ConfirmedDeleteTests(DeleteViewCase):
     def test_the_list_is_read_fresh_not_from_the_cache(self):
         with patch.object(dockerops, "list_backups_cached", return_value=self.listing) as read:
             self.post()
-        read.assert_called_once_with(ENDPOINT, make_instance(), use_cache=False)
+        read.assert_called_once_with(ENDPOINT, make_instance(ODOO_BACKUP_VERSION="v0.2.0"), use_cache=False)
 
 
 class PermissionTests(DeleteViewCase):

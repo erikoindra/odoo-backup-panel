@@ -208,3 +208,34 @@ Format: short context, decision, reason, consequences. New decisions are added a
   - `odoo-backup-service` is unchanged and its retention keeps working; a `odoo-backup delete` subcommand
     could replace the script later, at the price of a new image version for every `pgNN` tag;
   - deleting by rule (older than N days, keep N files) stays with `RETENTION_DAYS`, not the panel.
+
+## D14. Database-only backup from the "Back up now" button
+
+- **Context**: for a large production database (database and filestore of tens of GB each) the IT team needs a
+  quick backup of the database alone, to restore on a developer machine, without packing the filestore. The
+  owner first ran a second, database-only stack; the panel could show it (label "DB saja") but offered no way
+  to ask for one from a stack that makes full backups. The owner chose a button next to **Back up now**.
+- **Decision**: **Back up database only** runs the same `odoo-backup` as Back up now, with `BACKUP_FILESTORE=false`
+  and `BACKUP_PREFIX=<the stack's own prefix>dbonly-` set in the exec environment (docs/contract.md). Choices:
+  - **a prefix, not just the variable**: without it the zip would be named like a full backup and share its
+    retention and its group in the list. With it, the zips are a group of their own (`dbonly-shop_<stamp>.zip`), the
+    full backups' retention never deletes them, and the name says what is inside;
+  - **Health ignores them**: a manual database-only zip must not make a stack look "Fresh" while its scheduled
+    full backups fail. `BackupListing.latest_full` skips names that start with the database-only prefix, and the
+    Status card, the instance list and Health read from it; the file list and the restore default still use
+    the newest zip of any kind;
+  - **gated on the service version**: a service older than 0.2 ignores `BACKUP_FILESTORE` and would pack the whole
+    filestore under a name that says otherwise, so the button is off unless `ODOO_BACKUP_VERSION` is
+    `v0.2.0` or newer. The panel checks it when the button is clicked and again when the queued job runs;
+  - **absent on a stack that is database-only already**, where Back up now does the same;
+  - **a field on the job** (`Job.database_only`), not a new kind: it is still one backup, one at a time per stack.
+- **Reason**: the service needs no change (0.2.0 already reads both variables from its environment) and the panel
+  keeps its rule of running only commands the image already has.
+- **Consequences**:
+  - `ODOO_BACKUP_VERSION` joins the allowlist; it is not sensitive;
+  - the panel does not recognise edge builds (`master`) or pre-release versions, so the button stays off for them;
+  - a database-only zip is restored like any other: the restore makes the database and an empty filestore folder
+    (scenario 11), and attachments stored on disk are missing until the filestore is copied;
+  - retention for the `dbonly-` zips uses the container's `RETENTION_DAYS`, so it is the same number of days as
+    for the full ones;
+  - a database that is itself named `dbonly-...` would be taken for a database-only zip by the Health check.

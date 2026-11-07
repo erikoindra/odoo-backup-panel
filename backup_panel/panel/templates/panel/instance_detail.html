@@ -19,8 +19,11 @@
     {% if instance %}
     <form class="actions" method="post" action="{% url 'backup_now' endpoint.name slug %}">
       {% csrf_token %}
-      <button class="btn btn--primary" type="submit"{% if not instance.is_running or active_job %} disabled aria-describedby="backup-why"{% endif %}>{% include "panel/icons/play.svg" %}Back up now</button>
-      {% if not instance.is_running %}<span id="backup-why" class="hint">Container stopped.</span>{% elif active_job %}<span id="backup-why" class="hint">Waiting for the running job.</span>{% endif %}
+      <button class="btn btn--primary" type="submit" name="scope" value="full"{% if not instance.is_running or active_job %} disabled aria-describedby="backup-why"{% endif %}>{% include "panel/icons/play.svg" %}Back up now</button>
+      {% if not instance.db_only %}
+      <button class="btn btn--ghost" type="submit" name="scope" value="database" title="Leaves the filestore out: smaller and faster. Attachments stored on disk are not in the zip."{% if not instance.is_running or active_job %} disabled aria-describedby="backup-why"{% elif instance.db_only_blocker %} disabled aria-describedby="dbonly-why"{% endif %}>{% include "panel/icons/database-backup.svg" %}Back up database only</button>
+      {% endif %}
+      {% if not instance.is_running %}<span id="backup-why" class="hint">Container stopped.</span>{% elif active_job %}<span id="backup-why" class="hint">Waiting for the running job.</span>{% elif not instance.db_only and instance.db_only_blocker %}<span id="dbonly-why" class="hint">{{ instance.db_only_blocker }}</span>{% endif %}
     </form>
     {% endif %}
   </div>

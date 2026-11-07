@@ -233,6 +233,50 @@ class DiscoveryTests(SimpleTestCase):
                 self.assertIs(make_instance(BACKUP_FILESTORE=value).db_only, False)
         self.assertIs(make_instance().db_only, False)  # a service older than 0.2 does not set the variable
 
+    def test_the_service_version_is_kept_and_the_password_still_is_not(self):
+        self.assertIn("ODOO_BACKUP_VERSION", dockerops.ENV_ALLOWLIST)
+        info = inspect_result()
+        info["Config"]["Env"].append("ODOO_BACKUP_VERSION=v0.2.0")
+        instance = dockerops.instance_from_inspect("vps-1", info)
+        self.assertEqual(instance.version, "v0.2.0")
+        self.assertNotIn(SECRET, repr(instance))
+
+    def test_database_only_is_available_from_service_0_2(self):
+        for version in ("v0.2.0", "0.2.0", "v0.2.9", "v0.10.0", "v1.0.0"):
+            with self.subTest(version):
+                self.assertEqual(make_instance(ODOO_BACKUP_VERSION=version).db_only_blocker, "")
+
+    def test_database_only_is_not_available_when_the_version_is_older_or_unknown(self):
+        for version, shown in (
+            ("v0.1.0", "v0.1.0"),
+            ("v0.1.9", "v0.1.9"),
+            ("master", "master"),  # an edge build: not known to have it
+            ("v0.2.0-rc1", "v0.2.0-rc1"),
+            ("", "no version"),  # a build without the variable
+        ):
+            with self.subTest(version):
+                reason = make_instance(ODOO_BACKUP_VERSION=version).db_only_blocker
+                self.assertIn("Needs odoo-backup-service 0.2 or newer", reason)
+                self.assertIn(f"reports {shown}.", reason)
+
+    def test_a_version_with_non_ascii_digits_or_an_absurd_length_is_simply_not_a_version(self):
+        # \d alone would accept Arabic-Indic digits, and int() raises on more than 4300 digits (a 500 on the page)
+        for version in ("v٠.٢.٠", "v" + "9" * 5000 + ".0.0", "v1.2.3" + "0" * 5000):
+            with self.subTest(version[:12]):
+                self.assertIn("0.2 or newer", make_instance(ODOO_BACKUP_VERSION=version).db_only_blocker)
+
+    def test_a_stack_that_is_database_only_already_has_no_use_for_the_button(self):
+        instance = make_instance(ODOO_BACKUP_VERSION="v0.2.0", BACKUP_FILESTORE="false")
+        self.assertIn("already makes database-only backups", instance.db_only_blocker)
+
+    def test_a_long_version_is_cut_before_it_is_shown(self):
+        reason = make_instance(ODOO_BACKUP_VERSION="x" * 500).db_only_blocker
+        self.assertLess(len(reason), 120)
+
+    def test_the_database_only_prefix_is_the_stacks_own_plus_dbonly(self):
+        self.assertEqual(make_instance().db_only_prefix, "dbonly-")
+        self.assertEqual(make_instance(BACKUP_PREFIX="prod_").db_only_prefix, "prod_dbonly-")
+
     def test_other_images_are_ignored(self):
         self.assertIsNone(dockerops.instance_from_inspect("vps-1", inspect_result(Config__Image="nginx:alpine")))
 
@@ -704,3 +748,49 @@ class ProtectedBackupTests(SimpleTestCase):
 
     def test_nothing_is_protected_in_an_empty_listing(self):
         self.assertEqual(self.listing().protected, frozenset())
+
+    def test_a_database_only_zip_is_a_group_of_its_own_and_keeps_its_newest(self):
+        listing = self.listing(
+            zip_at("dbonly-shop_20261029_110000.zip", 1),
+            zip_at("shop_20261029_020000.zip", 10),
+        )
+        self.assertEqual(listing.protected, {"dbonly-shop_20261029_110000.zip", "shop_20261029_020000.zip"})
+
+
+class LatestFullBackupTests(SimpleTestCase):
+    """`latest_full` is what the Health of a stack is read from: database-only zips never count for it."""
+
+    def listing(self, prefix, *backups):
+        newest_first = sorted(backups, key=lambda b: b.mtime, reverse=True)
+        return dockerops.BackupListing(newest_first, datetime(2026, 10, 29, 12, 0, tzinfo=UTC), prefix)
+
+    def test_a_newer_database_only_zip_is_skipped(self):
+        full, partial = zip_at("shop_20261028_020000.zip", 34), zip_at("dbonly-shop_20261029_110000.zip", 1)
+        listing = self.listing("dbonly-", full, partial)
+        self.assertEqual((listing.latest.name, listing.latest_full.name), (partial.name, full.name))
+
+    def test_without_a_prefix_every_zip_counts(self):
+        listing = self.listing("", zip_at("dbonly-shop_20261029_110000.zip", 1), zip_at("shop_20261028_020000.zip", 34))
+        self.assertEqual(listing.latest_full.name, "dbonly-shop_20261029_110000.zip")
+        self.assertEqual(dockerops.BackupListing([], datetime(2026, 10, 29, tzinfo=UTC)).latest_full, None)
+
+    def test_only_database_only_zips_means_there_is_no_full_backup(self):
+        listing = self.listing("dbonly-", zip_at("dbonly-shop_20261029_110000.zip", 1))
+        self.assertEqual((listing.latest.name, listing.latest_full), ("dbonly-shop_20261029_110000.zip", None))
+
+    def test_the_stacks_own_prefix_is_part_of_the_database_only_prefix(self):
+        listing = self.listing(
+            "prod_dbonly-",
+            zip_at("prod_dbonly-shop_20261029_110000.zip", 1),
+            zip_at("dbonly-shop_20261029_100000.zip", 2),  # not this stack's: it counts as a full backup
+            zip_at("prod_shop_20261028_020000.zip", 34),
+        )
+        self.assertEqual(listing.latest_full.name, "dbonly-shop_20261029_100000.zip")
+
+    def test_the_cached_listing_carries_the_prefix(self):
+        dockerops.clear_cache()
+        instance = make_instance(BACKUP_PREFIX="prod_")
+        api = FakeApi(runner=runner(0, STAT_OUTPUT))
+        with patch.object(dockerops, "docker_client", return_value=FakeClient(api)):
+            listing = dockerops.list_backups_cached(Endpoint("vps-1", "docker", "tcp://x:1"), instance)
+        self.assertEqual(listing.db_only_prefix, "prod_dbonly-")

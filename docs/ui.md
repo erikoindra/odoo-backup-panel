@@ -8,7 +8,7 @@ All text is in English; server, stack, and database names in the examples are ge
 | Page | URL | Contents |
 |---|---|---|
 | Instances | `/instances/` | one panel per server; one table: Instance, Database, Last backup (+age), Files (count, total size), Status, Open. Search, count per status, "Refresh status" (`?refresh=1`). |
-| Detail | `/e/<server>/<stack>/` | title + meta, **Back up now**; left: job panel (if any) and the backup list (File, Size, Created, Age, Download, Restore; for superusers also a checkbox column and **Delete selected**); right: Status, Last job, "Before you restore" note. |
+| Detail | `/e/<server>/<stack>/` | title + meta, **Back up now** and **Back up database only** (no filestore; off with a reason when the service is older than 0.2, absent on a stack that is database-only already); left: job panel (if any) and the backup list (File, Size, Created, Age, Download, Restore; for superusers also a checkbox column and **Delete selected**); right: Status, Last job, "Before you restore" note. |
 | Delete backups | `/e/<server>/<stack>/delete/?filename=…` | superusers only: the chosen files, their total size, and a field where `DELETE` is typed. Opened from "Delete selected" in the backup table. |
 | Restore wizard | `/e/<server>/<stack>/restore/?file=` | 4 steps: Choose backup, Target database, Confirm, Progress (job page). |
 | Job | `/jobs/<id>/` | full job panel; polls every 2 seconds while active. |

@@ -1,4 +1,4 @@
-# Odoo Backup Panel — Flow & Technical Requirements
+# Odoo Backup Panel: Flow and Technical Requirements
 
 Version 0.3 · 2026-10-28
 Related repo: https://github.com/erikoindra/odoo-backup-service (companion, not modified)
@@ -55,7 +55,7 @@ MVP non-goals (do not build unless asked):
   `tecnativa/docker-socket-proxy`, or each Portainer CE environment through
   `/api/endpoints/<id>/docker` + `X-API-Key`. The panel must use the Docker API (exec without
   attach, get_archive, run). This goes against the backup-service design, which has no docker.sock.
-  Honest note: anyone who can sign in to the panel can be root on every connected host.
+  Note: anyone who can sign in to the panel can be root on every connected host.
   Mitigations are in section 7.
 - T2. Dynamic discovery per endpoint (no Instance model, no volume mounted into the panel).
   New instances appear automatically. Zips are mode 0600 and owned by root, so the panel reads
@@ -134,7 +134,8 @@ per server with a short reason and a Retry button.
    - `backup_volume` = the mount with Destination `/backups`
    - `odoo_data_volume` = the mount with Destination `/odoo-data`
    - from env (allowlist only): `PGHOST, PGPORT, PGUSER, DB_NAME, BACKUP_PREFIX,
-     BACKUP_FILESTORE, RETENTION_DAYS, CRON_SCHEDULE, TZ, FILESTORE_ROOT, ODOO_BACKUP_PG_MAJOR`
+     BACKUP_FILESTORE, RETENTION_DAYS, CRON_SCHEDULE, TZ, FILESTORE_ROOT, ODOO_BACKUP_PG_MAJOR,
+     ODOO_BACKUP_VERSION`
      (the container's full env is read once through `inspect`, then discarded except for the allowlist)
    - never read, store or log `PGPASSWORD` / `PGPASSWORD_FILE`.
 4. In-memory cache, because through Portainer + Cloudflare one request takes 0.1–1.5 seconds

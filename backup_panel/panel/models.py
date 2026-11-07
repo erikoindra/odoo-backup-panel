@@ -25,6 +25,7 @@ class Job(models.Model):
     filename = models.CharField(max_length=255, blank=True)  # download / restore
     target_db = models.CharField(max_length=63, blank=True)  # restore
     neutralize = models.BooleanField(default=False)  # restore: run `odoo neutralize` on the new database
+    database_only = models.BooleanField(default=False)  # backup: leave the filestore out (dbonly- prefix, D14)
     files = models.JSONField(default=list, blank=True)  # delete: the backup zips to remove
     steps = models.JSONField(default=list, blank=True)  # [{"name", "status", "at"}]
     summary = models.CharField(max_length=500, blank=True)  # the outcome in one sentence, or why it failed
@@ -68,6 +69,8 @@ class Job(models.Model):
             return f"Restore to {self.target_db}"
         if self.kind == self.Kind.DELETE:
             return f"Delete {self.files[0]}" if len(self.files) == 1 else f"Delete {len(self.files)} backup files"
+        if self.kind == self.Kind.BACKUP and self.database_only:
+            return "Back up database only"
         return {"backup": "Back up now", "download": f"Download {self.filename}"}[self.kind]
 
     # What changes the contents of /backups or the databases: one of these at a time per instance.

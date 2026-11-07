@@ -33,6 +33,12 @@ PROJECT_LABEL = "com.docker.compose.project"
 DOCKER_ENVIRONMENT_TYPES = frozenset({1, 2, 4})  # Portainer: Docker, Agent, Edge Agent
 NAME = re.compile(r"[A-Za-z0-9._-]+")
 ZIP_NAME = re.compile(r"[A-Za-z0-9._-]+\.zip")
+# A database-only backup started from the panel is named <BACKUP_PREFIX>dbonly-<db>_<stamp>.zip, a group apart
+# from the stack's full backups (docs/decisions.md D14).
+DB_ONLY_TAG = "dbonly-"
+# ODOO_BACKUP_VERSION of a release build, for example v0.2.0. It comes from a container's environment, so only
+# plain ASCII digits and a sane length count: int() on a long digit string raises, and \d accepts other scripts.
+SERVICE_VERSION = re.compile(r"v?(\d{1,4})\.(\d{1,4})\.(\d{1,4})", re.ASCII)
 
 # The only container variables the panel keeps (docs/contract.md). Never PGPASSWORD*.
 ENV_ALLOWLIST = (
@@ -47,6 +53,7 @@ ENV_ALLOWLIST = (
     "TZ",
     "FILESTORE_ROOT",
     "ODOO_BACKUP_PG_MAJOR",
+    "ODOO_BACKUP_VERSION",
 )
 
 # Runs inside the backup container as: sh -c WRAPPER sh <argv...>. Output goes to files because
@@ -142,6 +149,29 @@ class Instance:
         return self.config.get("BACKUP_FILESTORE", "").strip().lower() == "false"
 
     @property
+    def version(self):
+        return self.config.get("ODOO_BACKUP_VERSION", "")
+
+    @property
+    def db_only_prefix(self):
+        """BACKUP_PREFIX for a database-only backup started from the panel: the stack's own prefix plus `dbonly-`.
+        Its zips are then a group apart, and the service's retention only ever touches names that start with it."""
+        return self.config.get("BACKUP_PREFIX", "") + DB_ONLY_TAG
+
+    @property
+    def db_only_blocker(self):
+        """Why the panel cannot start a database-only backup on this stack, or "" when it can. A service older than
+        0.2 ignores BACKUP_FILESTORE and would pack the whole filestore under the dbonly- name."""
+        if self.db_only:
+            return "This stack already makes database-only backups. Use Back up now."
+        found = SERVICE_VERSION.fullmatch(self.version)
+        if found is None or (int(found[1]), int(found[2])) < (0, 2):
+            return (
+                f"Needs odoo-backup-service 0.2 or newer. This container reports {self.version[:40] or 'no version'}."
+            )
+        return ""
+
+    @property
     def schedule(self):
         cron, zone = self.config.get("CRON_SCHEDULE", ""), self.config.get("TZ", "")
         return f"{cron} · {zone}" if cron and zone else cron
@@ -210,10 +240,20 @@ class Backup:
 class BackupListing:
     backups: list
     read_at: datetime
+    db_only_prefix: str = ""  # names that start with it are database-only backups started from the panel
 
     @property
     def latest(self):
         return self.backups[0] if self.backups else None
+
+    @property
+    def latest_full(self):
+        """The newest backup that is not a database-only one started from the panel. It tells whether the scheduled
+        backups still run, so a manual database-only zip cannot hide a failing schedule. `backups` is newest first."""
+        for backup in self.backups:
+            if not (self.db_only_prefix and backup.name.startswith(self.db_only_prefix)):
+                return backup
+        return None
 
     @property
     def total_size(self):
@@ -516,7 +556,9 @@ def list_backups_cached(endpoint, instance, use_cache=True):
     return _cached(
         key,
         15,
-        lambda: BackupListing(list_backups(docker_client(endpoint).api, instance), datetime.now(UTC)),
+        lambda: BackupListing(
+            list_backups(docker_client(endpoint).api, instance), datetime.now(UTC), instance.db_only_prefix
+        ),
     )
 
 

@@ -157,13 +157,21 @@ def locate(job):
 
 
 def run_backup(job, endpoint, instance):
-    plan(job, ["Run odoo-backup", "Done"])
+    plan(job, ["Run odoo-backup (database only)" if job.database_only else "Run odoo-backup", "Done"])
+    environment = None
+    if job.database_only:
+        # The job may have waited in the queue, so check again that the service understands BACKUP_FILESTORE.
+        if instance.db_only_blocker:
+            mark(job, 0, "failed")
+            raise JobFailed(instance.db_only_blocker)
+        environment = {"BACKUP_FILESTORE": "false", "BACKUP_PREFIX": instance.db_only_prefix}
     mark(job, 0, "running")
     api = dockerops.docker_client(endpoint).api
     code, out, err = dockerops.run_detached(
         api,
         instance.container_id,
         ["odoo-backup"],
+        environment=environment,
         timeout=settings.JOB_TIMEOUT,
         poll_interval=settings.JOB_POLL_INTERVAL,
     )
@@ -176,7 +184,7 @@ def run_backup(job, endpoint, instance):
         raise JobFailed(f"odoo-backup exited with code {code}. See the log below.")
     mark(job, 0, "done")
     mark(job, 1, "done")
-    job.summary = "Backup finished."
+    job.summary = "Database-only backup finished." if job.database_only else "Backup finished."
 
 
 # --- restore --------------------------------------------------------------------------------
