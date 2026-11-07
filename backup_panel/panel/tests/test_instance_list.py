@@ -47,6 +47,20 @@ class InstanceListTests(TestCase):
         self.assertContains(response, "Container stopped")
         self.assertContains(response, "all databases")
 
+    def test_the_database_only_label_shows_for_false_and_for_nothing_else(self):
+        for config, shown in (
+            ({"BACKUP_FILESTORE": "false"}, True),
+            ({"BACKUP_FILESTORE": " False "}, True),
+            ({"BACKUP_FILESTORE": "true"}, False),
+            ({}, False),
+        ):
+            with self.subTest(config):
+                response = self.get([Server("vps-1", "portainer", [instance(**config)])])
+                if shown:
+                    self.assertContains(response, "DB saja", count=1)
+                else:
+                    self.assertNotContains(response, "DB saja")
+
     def test_every_stack_links_to_its_detail_page(self):
         response = self.get([Server("vps-1", "portainer", [instance()])])
         self.assertContains(response, 'href="/e/vps-1/acme-staging-backup/"', count=2)  # the name and "Open"

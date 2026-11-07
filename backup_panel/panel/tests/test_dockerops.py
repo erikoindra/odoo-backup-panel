@@ -216,6 +216,23 @@ class DiscoveryTests(SimpleTestCase):
         self.assertNotIn(SECRET, str(asdict(instance)))
         self.assertFalse(any(key.startswith("PGPASSWORD") for key in instance.config))
 
+    def test_backup_filestore_is_kept_and_the_password_still_is_not(self):
+        self.assertIn("BACKUP_FILESTORE", dockerops.ENV_ALLOWLIST)
+        info = inspect_result()
+        info["Config"]["Env"].append("BACKUP_FILESTORE=false")
+        instance = dockerops.instance_from_inspect("vps-1", info)
+        self.assertEqual(instance.config["BACKUP_FILESTORE"], "false")
+        self.assertNotIn(SECRET, repr(instance))
+
+    def test_db_only_means_backup_filestore_is_false_whatever_the_case_or_spaces(self):
+        for value in ("false", "False", "FALSE", " false "):
+            with self.subTest(value):
+                self.assertIs(make_instance(BACKUP_FILESTORE=value).db_only, True)
+        for value in ("true", "TRUE", ""):
+            with self.subTest(value):
+                self.assertIs(make_instance(BACKUP_FILESTORE=value).db_only, False)
+        self.assertIs(make_instance().db_only, False)  # a service older than 0.2 does not set the variable
+
     def test_other_images_are_ignored(self):
         self.assertIsNone(dockerops.instance_from_inspect("vps-1", inspect_result(Config__Image="nginx:alpine")))
 

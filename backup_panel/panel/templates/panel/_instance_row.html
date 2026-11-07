@@ -1,5 +1,5 @@
 {% load panel_tags %}<tr data-row data-level="{{ health.level }}"{% if health.level == 'loading' %} hx-get="{% url 'summary_partial' server.name instance.slug %}{% if refresh %}?refresh=1{% endif %}" hx-trigger="load" hx-swap="outerHTML"{% endif %}>
-  <td><a class="name" href="{% url 'instance_detail' server.name instance.slug %}">{{ instance.slug }}</a><span class="name-sub">{{ instance.container_name }}</span></td>
+  <td><a class="name" href="{% url 'instance_detail' server.name instance.slug %}">{{ instance.slug }}</a><span class="name-sub">{{ instance.container_name }}</span>{% if instance.db_only %}<span class="cell-sub"><span class="status status--idle">{% include "panel/icons/database-backup.svg" %}DB saja</span></span>{% endif %}</td>
   <td class="mono">{% if instance.database %}{{ instance.database }}{% else %}<span class="faint">all databases</span>{% endif %}</td>
   {% if health.level == 'loading' %}
   <td><span class="skel" style="width:9rem"></span></td>
