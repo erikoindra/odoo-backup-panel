@@ -44,6 +44,11 @@ class DeleteKindTests(TestCase):
         self.assertEqual(many.title, "Delete 3 backup files")
         self.assertEqual(Job(kind=Job.Kind.DELETE).title, "Delete 0 backup files")
 
+    def test_a_backup_is_database_only_only_when_asked(self):
+        self.assertIs(Job(kind=Job.Kind.BACKUP).database_only, False)
+        self.assertEqual(Job(kind=Job.Kind.BACKUP).title, "Back up now")
+        self.assertEqual(Job(kind=Job.Kind.BACKUP, database_only=True).title, "Back up database only")
+
     def test_a_delete_blocks_backups_and_restores_of_the_same_instance_and_the_other_way_round(self):
         for kind in (Job.Kind.DELETE, Job.Kind.BACKUP, Job.Kind.RESTORE):
             for status in (Job.Status.QUEUED, Job.Status.RUNNING):

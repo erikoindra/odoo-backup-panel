@@ -5,7 +5,7 @@
   <td><span class="skel" style="width:9rem"></span></td>
   <td class="num"><span class="skel" style="width:6rem;margin-left:auto"></span></td>
   {% elif listing.latest %}
-  <td>{{ listing.latest.mtime|date:"j M Y, H:i" }}<span class="cell-sub">{{ listing.latest.mtime|ago }}</span></td>
+  {% if listing.latest_full %}<td>{{ listing.latest_full.mtime|date:"j M Y, H:i" }}<span class="cell-sub">{{ listing.latest_full.mtime|ago }}</span></td>{% else %}<td><span class="faint">–</span></td>{% endif %}
   <td class="num">{{ listing.backups|length }} file{{ listing.backups|length|pluralize }}<span class="cell-sub">{{ listing.total_size|filesizeformat }}</span></td>
   {% else %}
   <td><span class="faint">–</span></td>

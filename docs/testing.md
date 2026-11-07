@@ -4,7 +4,7 @@ Three layers, from the cheapest to the closest to reality. Results below are fro
 
 ## 1. Unit tests (`manage.py test`, no Docker)
 
-341 tests, 27 of them (contract) skipped unless enabled. Docker is replaced by `FakeApi`/`FakeClient`
+367 tests, 30 of them (contract) skipped unless enabled. Docker is replaced by `FakeApi`/`FakeClient`
 (`panel/tests/fakes.py`), so these tests guard the logic, not the shell scripts.
 
 | Area | What is guarded |
@@ -15,6 +15,8 @@ Three layers, from the cheapest to the closest to reality. Results below are fro
 | Commands in the container | exec without attach, arguments through `"$@"` and env, temporary files deleted even on failure |
 | Download | strict names, must be in the listing, 404/409/502 before the first byte, a truncated stream raises an error, the HTTP stream is closed, audit `done`/`failed` |
 | Back up now | one active job per stack (also against restore), CSRF, login, server down, scheduled-backup lock message |
+| Back up database only | the scope field decides (`database` only; no scope or `full` is a full backup), the job runs `odoo-backup` with `BACKUP_FILESTORE=false` and the stack's prefix + `dbonly-` (a plain backup sets neither), a service older than 0.2 or with an unknown version is refused with a 409 and again when the queued job runs (nothing is started), a stack that is database-only already has no button, the button is off with its reason, version parsing (`v0.2.0`, `0.10.0`, `v1.0.0` yes; `v0.1.9`, `master`, `v0.2.0-rc1`, none no) |
+| Health with database-only zips | `latest_full` skips `dbonly-` zips, so a newer one cannot hide a stale schedule; only database-only zips say "No full backup yet"; the stack's own prefix is part of the database-only prefix |
 | Restore | form validation, name from the zip name, filestore root outside `/odoo-data` refused, every failure reports what already exists, nothing is deleted, form values never end up in the script text |
 | Worker | sequential claims, orphaned jobs failed at start, an error in job code does not kill the worker, `--once` |
 | Job page | job panel: polling stops when finished, steps/progress/log, `HX-Trigger` reloads the table, expired session in a fragment → `HX-Redirect` |
@@ -84,9 +86,17 @@ zip the service made itself:
 
 | # | Scenario | Result |
 |---|---|---|
-| 01 | the panel reads `BACKUP_FILESTORE=false` from the container and still keeps no secret | **written, not run yet** |
-| 02 | Back up now makes a prefixed zip that holds `dump.sql` only (CRC passes, no `filestore/` entry) | **written, not run yet** |
-| 03 | restore of that zip: database with the same rows, an empty filestore folder owned like Odoo's, no `.restore-*` folder left, the original untouched | **written, not run yet** |
+| 01 | the panel reads `BACKUP_FILESTORE=false` from the container and still keeps no secret | pass (CI, `577949a`) |
+| 02 | Back up now makes a prefixed zip that holds `dump.sql` only (CRC passes, no `filestore/` entry) | pass (CI, `577949a`) |
+| 03 | restore of that zip: database with the same rows, an empty filestore folder owned like Odoo's, no `.restore-*` folder left, the original untouched | pass (CI, `577949a`) |
+
+**Database-only button** (`DatabaseOnlyButtonContractTests`; a stack that makes full backups; it needs the 0.2.x image, which reports `ODOO_BACKUP_VERSION`). They share one lab and run in order:
+
+| # | Scenario | Result |
+|---|---|---|
+| 01 | the real image reports a version that allows the button, through `docker inspect` and the allowlist | **written, not run yet** |
+| 02 | the container already defines `BACKUP_FILESTORE=true` and `BACKUP_PREFIX=prod_`, as one from the sample compose file does; the exec environment replaces both and reaches the script: a `prod_dbonly-shop_<stamp>.zip` that holds `dump.sql` only, the log says "database only", and a stack with only such zips is "No full backup yet", not Fresh | **written, not run yet** |
+| 03 | a plain backup after it keeps the filestore (`prod_shop_<stamp>.zip`), `latest_full` is that one, and Health is Fresh | **written, not run yet** |
 
 Two runs on the real server (before Odoo was added 15/15; after the redesign 19/19 in both modes): directly over the Docker socket (35 seconds per mode), and with the panel talking
 through a **minimum-permission docker-socket-proxy** `CONTAINERS=1 EXEC=1 POST=1` (zero requests refused).
@@ -139,7 +149,7 @@ applied automatically.
   real Odoo through `odoo shell` (registry loaded, `res.users` readable), but its HTTP login page has not
   been tried.
 - **Delete in the contract tests (16-20)** against real Docker. They are written, but contract tests may only run on a disposable host (D12) and none was available. The script itself is proven in `dash` and `bash` (`test_delete_script.py`); BusyBox, the shell of the backup container, is exactly what scenario 19 checks.
-- **Database-only contract tests** (`DatabaseOnlyContractTests`) against real Docker. They need an odoo-backup-service 0.2.x image (released; the default `CONTRACT_BACKUP_IMAGE` is now `pg17-0.2`) and a disposable host (D12). They have not run yet: the CI `contract` job (a throwaway runner) runs them for the first time on the push that carries this change. Two assertions rest on reading the code, not on a run: the empty filestore folder gets the owner of `/d/filestore` (`FILESTORE_SCRIPT` does `chown -R` from it, as scenario 06 relies on), and `backup.group == "dbonly-shop"` (`BACKUP_STAMP`). When the CI job is green, replace "written, not run yet" in the table above. To run them by hand: `OBP_CONTRACT_ON_DISPOSABLE_HOST=yes scripts/run_contract_tests.sh` on a disposable host.
+- **Database-only button contract tests** (`DatabaseOnlyButtonContractTests`) against real Docker. They have not run yet: the CI `contract` job (a throwaway runner) runs them on the push that carries them. Until it is green, nothing proves that the exec environment replaces the `BACKUP_FILESTORE` and `BACKUP_PREFIX` that a container already defines, as one from the sample compose file does. When it is green, replace "written, not run yet" in the table above. To run them by hand: `OBP_CONTRACT_ON_DISPOSABLE_HOST=yes scripts/run_contract_tests.sh` on a disposable host.
 - **Zips of hundreds of MB** through Cloudflare (largest tested 17.7 MB), and `JOB_TIMEOUT` on a long restore.
 - **Non-admin Portainer token** (S5): all tests used an admin token.
 - **The panel behind real nginx and Cloudflare**: headers and flows were simulated with an HTTP client;

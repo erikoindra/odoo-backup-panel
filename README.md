@@ -17,7 +17,7 @@ audit trail. Test results: [`docs/testing.md`](docs/testing.md). Plan and decisi
 | Page | Contents |
 |---|---|
 | Instances | every backup stack, grouped by server, with its last backup; search |
-| Stack detail | schedule, retention, zip list, **Download**, **Back up now**, **Restore**, **Delete** (superusers) |
+| Stack detail | schedule, retention, zip list, **Download**, **Back up now**, **Back up database only** (no filestore, needs odoo-backup-service 0.2+), **Restore**, **Delete** (superusers) |
 | Job | steps, log, and result; refreshes automatically until it finishes |
 | Activity | every download, backup, and restore: who, when, the result |
 

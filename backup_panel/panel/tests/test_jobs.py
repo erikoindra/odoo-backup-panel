@@ -162,6 +162,31 @@ class BackupJobTests(JobTestCase):
         self.assertEqual([s["status"] for s in job.steps], ["done", "done"])
         self.assertIsNotNone(job.finished_at)
         self.assertEqual(self.lab.exec_calls[0][0], ["odoo-backup"])
+        env = self.lab.exec_calls[0][1]
+        self.assertNotIn("BACKUP_FILESTORE", env)  # a plain backup runs with the container's own settings
+        self.assertNotIn("BACKUP_PREFIX", env)
+
+    def test_database_only_runs_the_same_command_with_two_variables_changed(self):
+        self.server = Server("vps-1", "docker", [make_instance(ODOO_BACKUP_VERSION="v0.2.0")])
+        job = self.run_job(self.job(database_only=True))
+        self.assertEqual((job.status, job.summary), (Job.Status.DONE, "Database-only backup finished."))
+        self.assertEqual(job.steps[0]["name"], "Run odoo-backup (database only)")
+        argv, env = self.lab.exec_calls[0]
+        self.assertEqual(argv, ["odoo-backup"])
+        self.assertEqual((env["BACKUP_FILESTORE"], env["BACKUP_PREFIX"]), ("false", "dbonly-"))
+
+    def test_database_only_keeps_the_stacks_own_prefix(self):
+        self.server = Server("vps-1", "docker", [make_instance(ODOO_BACKUP_VERSION="v0.2.3", BACKUP_PREFIX="prod_")])
+        self.run_job(self.job(database_only=True))
+        self.assertEqual(self.lab.exec_calls[0][1]["BACKUP_PREFIX"], "prod_dbonly-")
+
+    def test_database_only_stops_when_the_service_is_too_old_by_the_time_it_runs(self):
+        self.server = Server("vps-1", "docker", [make_instance(ODOO_BACKUP_VERSION="v0.1.0")])
+        job = self.run_job(self.job(database_only=True))
+        self.assertEqual(job.status, Job.Status.FAILED)
+        self.assertIn("0.2 or newer", job.summary)
+        self.assertEqual([s["status"] for s in job.steps], ["failed", "todo"])
+        self.assertEqual(self.lab.exec_calls, [])  # nothing was started in the container
 
     def test_failure_keeps_the_output_and_says_which_code(self):
         self.lab.backup_exit, self.lab.backup_text = 1, b"ERROR: PostgreSQL is not accepting connections"

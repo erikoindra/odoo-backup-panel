@@ -25,7 +25,7 @@ class JobViewCase(TestCase):
         cls.user = get_user_model().objects.create_user("admin", password="x" * 14)
 
     def setUp(self):
-        self.server = Server("vps-1", "portainer", [make_instance()])
+        self.server = Server("vps-1", "portainer", [make_instance(ODOO_BACKUP_VERSION="v0.2.0")])
         self.listing = LISTING
         for target, kwargs in (
             ("find_endpoint", {"side_effect": lambda n: ENDPOINT if n == "vps-1" else None}),
@@ -63,6 +63,26 @@ class BackupNowTests(JobViewCase):
         self.assertEqual((job.kind, job.status), (Job.Kind.BACKUP, Job.Status.QUEUED))
         self.assertEqual((job.endpoint, job.instance_slug, job.created_by), ("vps-1", SLUG, self.user))
         self.assertEqual(job.container_name, f"{SLUG}-odoo-backup-1")
+
+    def test_the_scope_decides_whether_the_filestore_is_left_out(self):
+        for data, database_only in (({}, False), ({"scope": "full"}, False), ({"scope": "database"}, True)):
+            with self.subTest(data):
+                Job.objects.all().delete()
+                self.client.post(self.backup_url(), data)
+                self.assertEqual(Job.objects.get().database_only, database_only)
+
+    def test_database_only_needs_a_service_that_understands_it(self):
+        old = make_instance(ODOO_BACKUP_VERSION="v0.1.0")
+        database_only = make_instance(ODOO_BACKUP_VERSION="v0.2.0", BACKUP_FILESTORE="false", BACKUP_PREFIX="dbonly-")
+        for instance, reason in ((old, "0.2 or newer"), (database_only, "already makes database-only backups")):
+            with self.subTest(reason):
+                self.server = Server("vps-1", "portainer", [instance])
+                response = self.client.post(self.backup_url(), {"scope": "database"})
+                self.assertContains(response, reason, status_code=409)
+                self.assertEqual(Job.objects.count(), 0)
+                self.client.post(self.backup_url())  # the plain button still works on both
+                self.assertEqual(Job.objects.get().database_only, False)
+                Job.objects.all().delete()
 
     def test_only_post_and_login_and_a_csrf_token(self):
         self.assertEqual(self.client.get(self.backup_url()).status_code, 405)
@@ -415,6 +435,24 @@ class JobPageTests(JobViewCase):
         response = self.client.get(reverse("instance_detail", args=["vps-1", SLUG]))
         self.assertNotContains(response, 'id="job-panel"')
         self.assertNotContains(response, "disabled")
+        self.assertContains(response, 'name="scope" value="database"')
+
+    def test_the_database_only_button_says_why_it_is_off(self):
+        url = reverse("instance_detail", args=["vps-1", SLUG])
+        self.server = Server("vps-1", "portainer", [make_instance(ODOO_BACKUP_VERSION="v0.1.0")])
+        response = self.client.get(url)
+        self.assertContains(response, 'value="database" title=')
+        self.assertContains(response, 'disabled aria-describedby="dbonly-why"')
+        self.assertContains(response, "Needs odoo-backup-service 0.2 or newer. This container reports v0.1.0.")
+        self.assertContains(response, 'name="scope" value="full">')  # Back up now stays on
+
+    def test_a_database_only_stack_has_no_database_only_button(self):
+        self.server = Server(
+            "vps-1", "portainer", [make_instance(ODOO_BACKUP_VERSION="v0.2.0", BACKUP_FILESTORE="false")]
+        )
+        response = self.client.get(reverse("instance_detail", args=["vps-1", SLUG]))
+        self.assertContains(response, "Back up now")
+        self.assertNotContains(response, 'value="database"')
 
 
 class JobListTests(JobViewCase):

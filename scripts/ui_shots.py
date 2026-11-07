@@ -79,8 +79,14 @@ SERVERS = {
         "vps-1",
         "portainer",
         [
-            make_instance(),
-            make_instance("acme-prod-backup", database="acme_prod", endpoint="vps-1", RETENTION_DAYS="14"),
+            make_instance(ODOO_BACKUP_VERSION="v0.2.0"),
+            make_instance(
+                "acme-prod-backup",
+                database="acme_prod",
+                endpoint="vps-1",
+                RETENTION_DAYS="14",
+                ODOO_BACKUP_VERSION="v0.1.0",  # too old for database-only: the button is off with its reason
+            ),
             make_instance(
                 "demo-shop-backup",
                 database="demo_shop",
@@ -94,7 +100,7 @@ SERVERS = {
         "vps-2",
         "portainer",
         [
-            make_instance("wiki-backup", database="wiki", endpoint="vps-2"),
+            make_instance("wiki-backup", database="wiki", endpoint="vps-2", ODOO_BACKUP_VERSION="v0.2.0"),
             make_instance("old-erp-backup", status="exited", database="old_erp", endpoint="vps-2"),
         ],
     ),

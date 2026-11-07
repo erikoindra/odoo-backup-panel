@@ -7,9 +7,10 @@ against the real image to catch such changes.
 
 Tested with: **odoo-backup-service 0.2.x** (`ghcr.io/erikoindra/odoo-backup-service:pgNN-0.2`), which added
 `BACKUP_FILESTORE`. The contract tests default to `pg17-0.2`. The database-only scenarios need that variable, so
-they fail on a 0.1 image. Nothing in this file about `BACKUP_FILESTORE` has been run against the real 0.2.x image
-yet: the scenarios are written, and the CI `contract` job runs them on the next push. Everything else here is unchanged from 0.1.x:
-the default behaviour of the service did not change.
+they fail on a 0.1 image. The scenarios for a database-only stack (`DatabaseOnlyContractTests`) pass against
+`pg17-0.2` in CI. The scenarios for the Back up database only button (`DatabaseOnlyButtonContractTests`) are written
+and have not run yet. Everything else here is unchanged from 0.1.x: the default behaviour of the service did not
+change.
 
 ## Recognising an instance
 
@@ -28,16 +29,44 @@ the default behaviour of the service did not change.
 
 ## Env the panel may read (allowlist)
 
-`PGHOST PGPORT PGUSER DB_NAME BACKUP_PREFIX BACKUP_FILESTORE RETENTION_DAYS CRON_SCHEDULE TZ FILESTORE_ROOT ODOO_BACKUP_PG_MAJOR`
+`PGHOST PGPORT PGUSER DB_NAME BACKUP_PREFIX BACKUP_FILESTORE RETENTION_DAYS CRON_SCHEDULE TZ FILESTORE_ROOT ODOO_BACKUP_PG_MAJOR ODOO_BACKUP_VERSION`
 
 `BACKUP_FILESTORE` is `true` (default) or `false` and is not sensitive. When it is `false`, ignoring spaces and
 upper or lower case, the panel shows the label "DB saja" on the instance list and the instance page. A
-container that does not set it (service 0.1.x) is a normal, full-backup stack. The panel has no button of its
-own for a database-only backup: such a stack is a separate compose project with its own `BACKUP_PREFIX` and
-volumes, so it is a separate instance.
+container that does not set it (service 0.1.x) is a normal, full-backup stack. A stack that is database-only
+by its own settings is a separate compose project with its own `BACKUP_PREFIX` and volumes, so it is a separate
+instance.
+
+`ODOO_BACKUP_VERSION` is baked into the image (`v0.2.0` for a release, the branch name for an edge build) and is
+not sensitive. The panel only parses `v<major>.<minor>.<patch>`: below 0.2, or anything else, the "Back up database
+only" button is off and says why.
+
+### Database-only backup from the panel (docs/decisions.md D14)
+
+On a stack that makes full backups, the "Back up database only" button runs the same `odoo-backup`, with two
+variables set in the exec environment. They have to win over the container's own values (the sample compose file
+defines both); contract scenario 02 checks this:
+
+| Variable | Value |
+|---|---|
+| `BACKUP_FILESTORE` | `false` |
+| `BACKUP_PREFIX` | the stack's own `BACKUP_PREFIX` followed by `dbonly-` |
+
+What this relies on:
+
+- `odoo-backup` reads both variables from its process environment (the entrypoint's env snapshot is for cron only).
+- The service is 0.2.x, which understands `BACKUP_FILESTORE`. A 0.1 image ignores it and packs the whole filestore
+  under the `dbonly-` name, so the panel checks `ODOO_BACKUP_VERSION` when the button is clicked and again when the
+  job runs.
+
+What it produces:
+
+- Zips named `<prefix>dbonly-<db>_<stamp>.zip`, a group of their own: the retention of the full backups never touches
+  them, and the other way round. Their retention uses the container's `RETENTION_DAYS`.
+- The panel does not count them when it judges whether the schedule still runs (Health, "Last backup").
 
 `PGPASSWORD` and `PGPASSWORD_FILE` are **never** stored, shown, or logged, and the panel never
-asks for their values. Honest note: the `docker inspect` response carries the container's whole
+asks for their values. Note: the `docker inspect` response carries the container's whole
 env, so the panel receives the value briefly in memory. `instance_from_inspect` immediately
 filters it to the allowlist above and drops the rest (tested: the password is not in any
 `Instance`, also against a real password in a real Portainer). The password is only used inside

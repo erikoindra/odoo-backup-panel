@@ -245,7 +245,11 @@ def backup_now(request, endpoint, slug):
     endpoint, instance, problem = usable_instance(request, endpoint, slug)
     if problem:
         return problem
-    job = enqueue(request, endpoint, instance, Job.Kind.BACKUP)
+    database_only = request.POST.get("scope") == "database"
+    if database_only and instance.db_only_blocker:
+        detail_url = reverse("instance_detail", args=[endpoint.name, slug])
+        return error_page(request, 409, "Database-only backup is not available", instance.db_only_blocker, detail_url)
+    job = enqueue(request, endpoint, instance, Job.Kind.BACKUP, database_only=database_only)
     if job is None:
         return busy_page(request, endpoint, slug)
     return redirect("instance_detail", endpoint.name, slug)  # its job panel follows the job

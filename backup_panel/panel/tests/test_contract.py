@@ -30,7 +30,7 @@ import docker
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
-from panel import dockerops, jobs
+from panel import dockerops, health, jobs
 from panel.models import Job
 
 ENABLED = os.environ.get("PANEL_CONTRACT_TESTS") == "1"
@@ -492,6 +492,54 @@ class DatabaseOnlyContractTests(LabCase):
         self.assertEqual(self.volume_shell("ls -A /d/filestore"), "shop\nshop_dbonly")  # no leftover .restore-* folder
         self.assertEqual(self.rows("shop"), 2)  # the original database and filestore are untouched
         self.assertEqual(self.volume_shell("cat /d/filestore/shop/ab/abc123"), "one")
+
+
+class DatabaseOnlyButtonContractTests(LabCase):
+    """ "Back up database only" on a stack that makes full backups (odoo-backup-service 0.2.x). The panel runs the same
+    `odoo-backup` with BACKUP_FILESTORE=false and BACKUP_PREFIX=dbonly- in the exec environment (docs/decisions.md D14).
+    The tests run in order and share the lab.
+
+    The container is set up like one from the sample compose file, which always defines both variables
+    (`BACKUP_FILESTORE: ${BACKUP_FILESTORE:-true}`), so the exec environment has to replace values that are already
+    there, not only add new ones. The prefix is not empty, to check that `dbonly-` is appended to it."""
+
+    BACKUP_ENV: ClassVar[dict] = {"BACKUP_FILESTORE": "true", "BACKUP_PREFIX": "prod_"}
+
+    def listing(self):
+        return dockerops.list_backups_cached(self.endpoint, self.instance(), use_cache=False)
+
+    def read_zip(self, name):
+        stream = dockerops.open_backup_stream(self.api(), self.instance(), name)
+        return zipfile.ZipFile(io.BytesIO(b"".join(stream.chunks())))
+
+    def test_01_the_image_reports_a_version_that_allows_the_button(self):
+        instance = self.instance()
+        self.assertEqual(instance.db_only_blocker, "", instance.version)
+        self.assertFalse(instance.db_only)
+        self.assertEqual(instance.db_only_prefix, "prod_dbonly-")
+
+    def test_02_the_exec_environment_reaches_the_script(self):
+        self.assertEqual(self.zips(), [])
+        job = self.run_job(Job.Kind.BACKUP, database_only=True)
+        self.assertEqual((job.status, job.summary), (Job.Status.DONE, "Database-only backup finished."), job.log)
+        self.assertIn("database only", job.log)  # the script's own line: OK <name> (<size>, database only)
+        (backup,) = self.zips()
+        self.assertRegex(backup.name, r"^prod_dbonly-shop_\d{8}_\d{6}\.zip$")  # both container values were replaced
+        archive = self.read_zip(backup.name)
+        self.assertIsNone(archive.testzip())
+        self.assertEqual(archive.namelist(), ["dump.sql"])
+        # A zip like that is no full backup, so a stack with only such zips is not "Fresh".
+        status = health.assess(self.instance(), self.listing())
+        self.assertEqual((status.level, status.label), ("empty", "No full backup yet"))
+
+    def test_03_a_full_backup_next_to_it_keeps_the_filestore_and_is_what_health_reads(self):
+        job = self.run_job(Job.Kind.BACKUP)
+        self.assertEqual((job.status, job.summary), (Job.Status.DONE, "Backup finished."), job.log)
+        listing = self.listing()
+        self.assertEqual(len(listing.backups), 2)
+        self.assertRegex(listing.latest_full.name, r"^prod_shop_\d{8}_\d{6}\.zip$")
+        self.assertIn("filestore/ab/abc123", self.read_zip(listing.latest_full.name).namelist())
+        self.assertEqual(health.assess(self.instance(), listing).level, "fresh")
 
 
 @unittest.skipUnless(ODOO_IMAGE, "set CONTRACT_ODOO_IMAGE (for example odoo:19.0) to test neutralize on real Odoo")

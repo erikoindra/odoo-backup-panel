@@ -123,6 +123,24 @@ class AssessTests(SimpleTestCase):
         result = self.assess(listing_=BackupListing([], NOW))
         self.assertEqual((result.level, result.css), ("empty", "warn"))
 
+    def test_a_database_only_zip_does_not_hide_a_schedule_that_stopped(self):
+        partial = Backup("dbonly-acme_staging_20261029_115900.zip", 1, NOW - timedelta(minutes=1))
+        full = Backup("acme_staging_20261027_020000.zip", 1, NOW - 58 * H)
+        result = self.assess(listing_=BackupListing([partial, full], NOW, "dbonly-"))
+        self.assertEqual((result.level, result.label), ("stale", "Stale"))
+        self.assertIn("58 hours", result.reason)
+
+    def test_a_recent_full_backup_stays_fresh_next_to_older_database_only_zips(self):
+        full = Backup("acme_staging_20261029_020000.zip", 1, NOW - 10 * H)
+        partial = Backup("dbonly-acme_staging_20261028_110000.zip", 1, NOW - 25 * H)
+        self.assertEqual(self.assess(listing_=BackupListing([full, partial], NOW, "dbonly-")).level, "fresh")
+
+    def test_only_database_only_zips_say_so(self):
+        partial = Backup("dbonly-acme_staging_20261029_115900.zip", 1, NOW - timedelta(minutes=1))
+        result = self.assess(listing_=BackupListing([partial], NOW, "dbonly-"))
+        self.assertEqual((result.level, result.label, result.css), ("empty", "No full backup yet", "warn"))
+        self.assertIn("Only database-only backups exist", result.reason)
+
     def test_a_stopped_container_wins_over_everything(self):
         stopped = make_instance(status="exited")
         result = self.assess(1 * H, error="x", instance=stopped)
