@@ -4,14 +4,14 @@ Three layers, from the cheapest to the closest to reality. Results below are fro
 
 ## 1. Unit tests (`manage.py test`, no Docker)
 
-332 tests, 24 of them (contract) skipped unless enabled. Docker is replaced by `FakeApi`/`FakeClient`
+341 tests, 27 of them (contract) skipped unless enabled. Docker is replaced by `FakeApi`/`FakeClient`
 (`panel/tests/fakes.py`), so these tests guard the logic, not the shell scripts.
 
 | Area | What is guarded |
 |---|---|
 | Login and IP | lockout per client address behind the proxy, forged `X-Forwarded-For` entries ignored, logout only via POST |
 | Endpoints | Portainer URL becomes a Docker URL with an explicit port, environment allowlist, duplicate names dropped, API key absent from `repr` |
-| Discovery | only backup-service images, env filtered to the allowlist, `PGPASSWORD` never stored, duplicate stack names hidden |
+| Discovery | only backup-service images, env filtered to the allowlist (it includes `BACKUP_FILESTORE`), `PGPASSWORD` never stored, duplicate stack names hidden |
 | Commands in the container | exec without attach, arguments through `"$@"` and env, temporary files deleted even on failure |
 | Download | strict names, must be in the listing, 404/409/502 before the first byte, a truncated stream raises an error, the HTTP stream is closed, audit `done`/`failed` |
 | Back up now | one active job per stack (also against restore), CSRF, login, server down, scheduled-backup lock message |
@@ -19,7 +19,7 @@ Three layers, from the cheapest to the closest to reality. Results below are fro
 | Worker | sequential claims, orphaned jobs failed at start, an error in job code does not kill the worker, `--once` |
 | Job page | job panel: polling stops when finished, steps/progress/log, `HX-Trigger` reloads the table, expired session in a fragment → `HX-Redirect` |
 | Instance status | cron (`*/n`, ranges, lists, weekdays, unparseable), expected interval = longest gap, Stale boundary exactly 1.5×, stopped container beats everything, age/duration formatting |
-| List and detail | rows load themselves and are replaced by full rows, `?refresh=1` passed to every row, Status card via OOB swap, active job panel and last job |
+| List and detail | rows load themselves and are replaced by full rows, `?refresh=1` passed to every row, Status card via OOB swap, active job panel and last job, the "DB saja" label only for `BACKUP_FILESTORE=false` (any case, spaces ignored) in the list, the finished row and the detail page |
 | Restore wizard | file from `?file=` or the newest, name/confirmation/file validated, errors open the right step, one job per stack, neutralize switch stored in the job |
 | Restore checks | database and folder free, other jobs, Odoo container (only when neutralizing), one failed check does not hide the others, POST + CSRF |
 | Neutralize | Odoo container found through the volume (one, running, no environment in the result), the job stops before changing anything if there is none, a neutralize failure is reported as "NOT neutralized" without deleting, the script only accepts the name through a variable |
@@ -77,6 +77,17 @@ the database with `odoo -i base`, then an Odoo container attached to the same da
 | 03 | restore without the switch: not neutralized, the summary reminds you | pass |
 | 04 | Odoo container stopped: the job fails before anything is created (no database, no folder) | pass |
 
+**Database-only mode** (`DatabaseOnlyContractTests`; the backup container runs with `BACKUP_FILESTORE=false` and
+`BACKUP_PREFIX=dbonly-`, while the data volume still holds a filestore). It needs odoo-backup-service 0.2.x (the default `pg17-0.2` image); on a 0.1 image the zip would still hold the
+filestore and the scenarios fail. Scenario 11 above restores a hand-made zip without `filestore/`; these use a
+zip the service made itself:
+
+| # | Scenario | Result |
+|---|---|---|
+| 01 | the panel reads `BACKUP_FILESTORE=false` from the container and still keeps no secret | **written, not run yet** |
+| 02 | Back up now makes a prefixed zip that holds `dump.sql` only (CRC passes, no `filestore/` entry) | **written, not run yet** |
+| 03 | restore of that zip: database with the same rows, an empty filestore folder owned like Odoo's, no `.restore-*` folder left, the original untouched | **written, not run yet** |
+
 Two runs on the real server (before Odoo was added 15/15; after the redesign 19/19 in both modes): directly over the Docker socket (35 seconds per mode), and with the panel talking
 through a **minimum-permission docker-socket-proxy** `CONTAINERS=1 EXEC=1 POST=1` (zero requests refused).
 
@@ -128,6 +139,7 @@ applied automatically.
   real Odoo through `odoo shell` (registry loaded, `res.users` readable), but its HTTP login page has not
   been tried.
 - **Delete in the contract tests (16-20)** against real Docker. They are written, but contract tests may only run on a disposable host (D12) and none was available. The script itself is proven in `dash` and `bash` (`test_delete_script.py`); BusyBox, the shell of the backup container, is exactly what scenario 19 checks.
+- **Database-only contract tests** (`DatabaseOnlyContractTests`) against real Docker. They need an odoo-backup-service 0.2.x image (released; the default `CONTRACT_BACKUP_IMAGE` is now `pg17-0.2`) and a disposable host (D12). They have not run yet: the CI `contract` job (a throwaway runner) runs them for the first time on the push that carries this change. Two assertions rest on reading the code, not on a run: the empty filestore folder gets the owner of `/d/filestore` (`FILESTORE_SCRIPT` does `chown -R` from it, as scenario 06 relies on), and `backup.group == "dbonly-shop"` (`BACKUP_STAMP`). When the CI job is green, replace "written, not run yet" in the table above. To run them by hand: `OBP_CONTRACT_ON_DISPOSABLE_HOST=yes scripts/run_contract_tests.sh` on a disposable host.
 - **Zips of hundreds of MB** through Cloudflare (largest tested 17.7 MB), and `JOB_TIMEOUT` on a long restore.
 - **Non-admin Portainer token** (S5): all tests used an admin token.
 - **The panel behind real nginx and Cloudflare**: headers and flows were simulated with an HTTP client;

@@ -84,6 +84,21 @@ class DetailPageTests(DetailBase):
         self.assertContains(response, 'href="/instances/"')  # breadcrumb back to the list
         cached.assert_not_called()  # the table arrives later, as a fragment
 
+    def test_the_database_only_label_shows_for_false_and_for_nothing_else(self):
+        for config, shown in (
+            ({"BACKUP_FILESTORE": "false"}, True),
+            ({"BACKUP_FILESTORE": " False "}, True),
+            ({"BACKUP_FILESTORE": "true"}, False),
+            ({}, False),
+        ):
+            with self.subTest(config):
+                server = Server("vps-1", "portainer", [make_instance(**config)])
+                response, _ = self.get(urls()["detail"], server=server)
+                if shown:
+                    self.assertContains(response, "DB saja", count=1)
+                else:
+                    self.assertNotContains(response, "DB saja")
+
     def test_the_table_is_loaded_on_demand(self):
         response, _ = self.get(urls()["detail"])
         self.assertContains(response, f'hx-get="{urls()["backups"]}"')
@@ -229,6 +244,13 @@ class SummaryTests(DetailBase):
         self.assertContains(response, f'href="{urls()["detail"]}"')
         self.assertNotContains(response, "hx-get=")  # a finished row does not load again
         self.assertTrue(response.content.decode().lstrip().startswith("<tr"))
+
+    def test_the_database_only_label_is_in_the_finished_row_too(self):
+        server = Server("vps-1", "portainer", [make_instance(BACKUP_FILESTORE="false")])
+        response, _ = self.get(urls()["summary"], server=server, listing=self.fresh())
+        self.assertContains(response, "DB saja", count=1)
+        response, _ = self.get(urls()["summary"], listing=self.fresh())
+        self.assertNotContains(response, "DB saja")
 
     def test_a_late_backup_is_stale_with_the_reason(self):
         response, _ = self.get(urls()["summary"], listing=self.fresh(hours=60))

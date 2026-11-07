@@ -41,6 +41,7 @@ ENV_ALLOWLIST = (
     "PGUSER",
     "DB_NAME",
     "BACKUP_PREFIX",
+    "BACKUP_FILESTORE",
     "RETENTION_DAYS",
     "CRON_SCHEDULE",
     "TZ",
@@ -134,6 +135,11 @@ class Instance:
     @property
     def pg_major(self):
         return self.config.get("ODOO_BACKUP_PG_MAJOR", "")
+
+    @property
+    def db_only(self):
+        """The stack runs with BACKUP_FILESTORE=false: its zips hold dump.sql and no filestore/."""
+        return self.config.get("BACKUP_FILESTORE", "").strip().lower() == "false"
 
     @property
     def schedule(self):

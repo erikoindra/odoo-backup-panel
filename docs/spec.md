@@ -134,7 +134,7 @@ per server with a short reason and a Retry button.
    - `backup_volume` = the mount with Destination `/backups`
    - `odoo_data_volume` = the mount with Destination `/odoo-data`
    - from env (allowlist only): `PGHOST, PGPORT, PGUSER, DB_NAME, BACKUP_PREFIX,
-     RETENTION_DAYS, CRON_SCHEDULE, TZ, FILESTORE_ROOT, ODOO_BACKUP_PG_MAJOR`
+     BACKUP_FILESTORE, RETENTION_DAYS, CRON_SCHEDULE, TZ, FILESTORE_ROOT, ODOO_BACKUP_PG_MAJOR`
      (the container's full env is read once through `inspect`, then discarded except for the allowlist)
    - never read, store or log `PGPASSWORD` / `PGPASSWORD_FILE`.
 4. In-memory cache, because through Portainer + Cloudflare one request takes 0.1–1.5 seconds

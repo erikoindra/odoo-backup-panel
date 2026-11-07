@@ -12,7 +12,7 @@
 #   OBP_CONTRACT_ON_DISPOSABLE_HOST=yes scripts/run_contract_tests.sh [--proxy]
 #
 # Settings (same meaning as in test_contract.py):
-#   CONTRACT_BACKUP_IMAGE    default ghcr.io/erikoindra/odoo-backup-service:pg17-0.1
+#   CONTRACT_BACKUP_IMAGE    default ghcr.io/erikoindra/odoo-backup-service:pg17-0.2
 #   CONTRACT_POSTGRES_IMAGE  default postgres:17-alpine
 #   CONTRACT_ODOO_IMAGE      default unset: the neutralize tests are skipped (for example odoo:19.0)
 #   DOCKER_SOCKET            default /var/run/docker.sock
@@ -49,7 +49,7 @@ docker build -q -t "$IMAGE" -f "$ROOT/scripts/contract/Dockerfile" "$ROOT/backup
 env_args=(
   -e PANEL_CONTRACT_TESTS=1
   -e DJANGO_SECRET_KEY=contract-only-not-secret
-  -e "CONTRACT_BACKUP_IMAGE=${CONTRACT_BACKUP_IMAGE:-ghcr.io/erikoindra/odoo-backup-service:pg17-0.1}"
+  -e "CONTRACT_BACKUP_IMAGE=${CONTRACT_BACKUP_IMAGE:-ghcr.io/erikoindra/odoo-backup-service:pg17-0.2}"
   -e "CONTRACT_POSTGRES_IMAGE=${CONTRACT_POSTGRES_IMAGE:-postgres:17-alpine}"
   -e "CONTRACT_ODOO_IMAGE=${CONTRACT_ODOO_IMAGE:-}"
 )

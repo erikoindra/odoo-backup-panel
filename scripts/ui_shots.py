@@ -81,7 +81,13 @@ SERVERS = {
         [
             make_instance(),
             make_instance("acme-prod-backup", database="acme_prod", endpoint="vps-1", RETENTION_DAYS="14"),
-            make_instance("demo-shop-backup", database="demo_shop", endpoint="vps-1", CRON_SCHEDULE="0 */6 * * *"),
+            make_instance(
+                "demo-shop-backup",
+                database="demo_shop",
+                endpoint="vps-1",
+                CRON_SCHEDULE="0 */6 * * *",
+                BACKUP_FILESTORE="false",
+            ),
         ],
     ),
     "vps-2": Server(

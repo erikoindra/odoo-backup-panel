@@ -173,6 +173,18 @@ class MarkupTests(TestCase):
                     fragment = self.client.get(url, headers={"HX-Request": "true"})
                     check(self, fragment.content.decode(), f"{name} fragment")
 
+    def test_the_database_only_label_is_well_formed(self):
+        self.server = Server("vps-1", "portainer", [make_instance(BACKUP_FILESTORE="false")])
+        for name, url in (
+            ("database-only list", reverse("instance_list")),
+            ("database-only detail", reverse("instance_detail", args=["vps-1", SLUG])),
+            ("database-only summary", reverse("summary_partial", args=["vps-1", SLUG])),
+        ):
+            with self.subTest(name):
+                response = self.client.get(url)
+                self.assertContains(response, "DB saja")
+                check(self, response.content.decode(), name)
+
     def test_the_restore_check_fragment_is_well_formed(self):
         items = [checks.Check(True, "Present"), checks.Check(False, "Missing", "Because <b>")]
         with patch.object(checks, "run_checks", return_value=items):

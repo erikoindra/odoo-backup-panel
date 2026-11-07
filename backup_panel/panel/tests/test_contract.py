@@ -11,7 +11,7 @@ the Docker socket, so whoever can run code in it controls the host (see decision
   CONTRACT_ADMIN_URL   Docker used to build the lab           (default unix:///var/run/docker.sock)
   CONTRACT_PANEL_URL   Docker the panel talks to              (default: same as the admin URL)
                        point it at a docker-socket-proxy to check the permissions the panel needs
-  CONTRACT_BACKUP_IMAGE  image under test                     (default ghcr.io/erikoindra/odoo-backup-service:pg17-0.1)
+  CONTRACT_BACKUP_IMAGE  image under test                     (default ghcr.io/erikoindra/odoo-backup-service:pg17-0.2)
   CONTRACT_POSTGRES_IMAGE                                      (default postgres:17-alpine)
   CONTRACT_ODOO_IMAGE  an Odoo image, e.g. odoo:19.0           (default: unset = skip the neutralize tests)
 Everything created is named obp-contract-<random> and removed afterwards.
@@ -24,6 +24,7 @@ import secrets
 import time
 import unittest
 import zipfile
+from typing import ClassVar
 
 import docker
 from django.contrib.auth import get_user_model
@@ -35,7 +36,7 @@ from panel.models import Job
 ENABLED = os.environ.get("PANEL_CONTRACT_TESTS") == "1"
 ADMIN_URL = os.environ.get("CONTRACT_ADMIN_URL", "unix:///var/run/docker.sock")
 PANEL_URL = os.environ.get("CONTRACT_PANEL_URL", ADMIN_URL)
-BACKUP_IMAGE = os.environ.get("CONTRACT_BACKUP_IMAGE", "ghcr.io/erikoindra/odoo-backup-service:pg17-0.1")
+BACKUP_IMAGE = os.environ.get("CONTRACT_BACKUP_IMAGE", "ghcr.io/erikoindra/odoo-backup-service:pg17-0.2")
 POSTGRES_IMAGE = os.environ.get("CONTRACT_POSTGRES_IMAGE", "postgres:17-alpine")
 ODOO_IMAGE = os.environ.get("CONTRACT_ODOO_IMAGE", "")
 PASSWORD = "contract-pass-1"
@@ -54,9 +55,10 @@ def wait_until(check, seconds, message):
 @unittest.skipUnless(ENABLED, "set PANEL_CONTRACT_TESTS=1 to run against a real Docker daemon")
 @override_settings(PORTAINER_URL="", PORTAINER_API_KEY="", JOB_POLL_INTERVAL=0.2, JOB_TIMEOUT=300)
 class LabCase(TestCase):
-    """The lab and the helpers; the scenarios are in the subclasses. A subclass changes DB_NAME and seed()."""
+    """The lab and the helpers; the scenarios are in the subclasses. A subclass changes DB_NAME, BACKUP_ENV and seed()."""
 
     DB_NAME = "shop"
+    BACKUP_ENV: ClassVar[dict] = {}  # more environment for the backup container, for example BACKUP_FILESTORE
 
     @classmethod
     def setUpClass(cls):
@@ -128,6 +130,7 @@ class LabCase(TestCase):
                 "DB_NAME": cls.DB_NAME,
                 "CRON_SCHEDULE": "0 4 * * *",
                 "TZ": "UTC",
+                **cls.BACKUP_ENV,
             },
             volumes={cls.data: {"bind": "/odoo-data", "mode": "ro"}, cls.backups: {"bind": "/backups", "mode": "rw"}},
         )
@@ -451,6 +454,44 @@ class ContractTests(LabCase):
         self.assertEqual(job.status, Job.Status.FAILED)
         self.assertIn("shop_20190101_000000.zip is no longer in /backups", job.summary)
         self.assertIn("Nothing was changed", job.summary)
+
+
+class DatabaseOnlyContractTests(LabCase):
+    """A stack with BACKUP_FILESTORE=false (odoo-backup-service 0.2.x): its zips hold dump.sql and no filestore/.
+
+    The data volume does have a filestore, so the zip lacks it because the service left it out, not because
+    there was none to pack."""
+
+    BACKUP_ENV: ClassVar[dict] = {"BACKUP_FILESTORE": "false", "BACKUP_PREFIX": "dbonly-"}
+
+    def test_01_the_panel_sees_the_variable_and_still_keeps_no_secret(self):
+        instance = self.instance()
+        self.assertEqual(instance.config["BACKUP_FILESTORE"], "false")
+        self.assertTrue(instance.db_only)
+        self.assertNotIn(PASSWORD, repr(instance))
+
+    def test_02_backup_now_makes_a_zip_with_dump_sql_and_no_filestore(self):
+        self.assertEqual(self.zips(), [])
+        job = self.run_job(Job.Kind.BACKUP)
+        self.assertEqual((job.status, job.summary), (Job.Status.DONE, "Backup finished."), job.log)
+        (backup,) = self.zips()
+        self.assertRegex(backup.name, r"^dbonly-shop_\d{8}_\d{6}\.zip$")
+        self.assertEqual(backup.group, "dbonly-shop")  # the prefix keeps it apart from a full backup's zips
+        stream = dockerops.open_backup_stream(self.api(), self.instance(), backup.name)
+        archive = zipfile.ZipFile(io.BytesIO(b"".join(stream.chunks())))
+        self.assertIsNone(archive.testzip())
+        self.assertEqual(archive.namelist(), ["dump.sql"])
+        self.assertIn(b"PostgreSQL database dump", archive.read("dump.sql"))
+
+    def test_03_restore_of_that_zip_makes_the_database_and_an_empty_filestore_folder(self):
+        job = self.run_job(Job.Kind.RESTORE, filename=self.newest_zip(), target_db="shop_dbonly")
+        self.assertEqual(job.status, Job.Status.DONE, job.summary + "\n" + job.log)
+        self.assertEqual(self.rows("shop_dbonly"), 2)
+        self.assertEqual(self.volume_shell("ls -A /d/filestore/shop_dbonly | wc -l"), "0")
+        self.assertEqual(self.volume_shell("stat -c %u:%g /d/filestore/shop_dbonly"), OWNER)
+        self.assertEqual(self.volume_shell("ls -A /d/filestore"), "shop\nshop_dbonly")  # no leftover .restore-* folder
+        self.assertEqual(self.rows("shop"), 2)  # the original database and filestore are untouched
+        self.assertEqual(self.volume_shell("cat /d/filestore/shop/ab/abc123"), "one")
 
 
 @unittest.skipUnless(ODOO_IMAGE, "set CONTRACT_ODOO_IMAGE (for example odoo:19.0) to test neutralize on real Odoo")

@@ -12,6 +12,7 @@
         <span>Container <b class="mono">{{ instance.container_name }}</b></span>
         <span>Database <b class="mono">{% if instance.database %}{{ instance.database }}{% else %}all databases{% endif %}</b></span>
         {% if instance.pg_major %}<span>PostgreSQL <b>{{ instance.pg_major }}</b></span>{% endif %}
+        {% if instance.db_only %}<span class="status status--idle">{% include "panel/icons/database-backup.svg" %}DB saja</span>{% endif %}
       </div>
       {% endif %}
     </div>
